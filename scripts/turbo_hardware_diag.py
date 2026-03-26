@@ -94,6 +94,53 @@ def _safe_int(val: str) -> int:
         return 0
 
 
+def detect_storage_type(model_path: str, plat: str) -> str:
+    """Detect if model file is on SSD or HDD. Returns 'ssd', 'hdd', or 'unknown'."""
+    try:
+        if plat == "Darwin":
+            # Get the mount point for the model file
+            result = subprocess.run(
+                ["diskutil", "info", "-plist", "/"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if "Solid State" in result.stdout or "SolidState" in result.stdout:
+                return "ssd"
+            # Apple Silicon Macs are always SSD
+            cpu = subprocess.run(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if "Apple" in cpu.stdout:
+                return "ssd"
+            return "unknown"
+        elif plat == "Linux":
+            # Find the block device for the model file's mount point
+            model_real = os.path.realpath(model_path)
+            result = subprocess.run(
+                ["df", model_real],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                lines = result.stdout.strip().split("\n")
+                if len(lines) >= 2:
+                    dev = lines[1].split()[0]  # /dev/sda1, /dev/nvme0n1p1, etc.
+                    # NVMe devices are always SSD
+                    if "nvme" in dev:
+                        return "ssd"
+                    # Check /sys/block for rotational flag
+                    base_dev = re.sub(r"[0-9]+$", "", os.path.basename(dev))
+                    base_dev = re.sub(r"p[0-9]+$", "", base_dev)  # nvme0n1p1 → nvme0n1
+                    rotational_path = f"/sys/block/{base_dev}/queue/rotational"
+                    if os.path.exists(rotational_path):
+                        with open(rotational_path) as f:
+                            return "hdd" if f.read().strip() == "1" else "ssd"
+            return "unknown"
+    except Exception:
+        # Storage detection is best-effort; caller logs the fallback value
+        return "unknown"
+    return "unknown"
+
+
 def _find_model(llama_dir: str) -> Optional[str]:
     """Auto-detect a .gguf model file near the llama.cpp directory."""
     search_dirs = [
@@ -248,7 +295,7 @@ class BackgroundMonitor(threading.Thread):
         try:
             load_1m = str(round(os.getloadavg()[0], 2))
         except Exception:
-            pass
+            pass  # Expected probe failure on platforms without getloadavg
 
         if plat == "Darwin":
             mem_pct = self._macos_mem_pressure()
@@ -291,7 +338,7 @@ class BackgroundMonitor(threading.Thread):
                 return str(round((active + wired) * 100 / total))
             return "0"
         except Exception:
-            return "0"
+            return "0"  # Expected probe failure — vm_stat not available or parse error
 
     @staticmethod
     def _macos_swap_mb() -> str:
@@ -302,7 +349,7 @@ class BackgroundMonitor(threading.Thread):
             m = re.search(r"used\s*=\s*([\d.]+)M", out)
             return m.group(1) if m else "0"
         except Exception:
-            return "0"
+            return "0"  # Expected probe failure — sysctl vm.swapusage not available
 
     @staticmethod
     def _macos_cpu_speed_limit() -> str:
@@ -313,7 +360,7 @@ class BackgroundMonitor(threading.Thread):
             m = re.search(r"CPU_Speed_Limit\s+(\d+)", out)
             return m.group(1) if m else "100"
         except Exception:
-            return "100"
+            return "100"  # Expected probe failure — pmset not available
 
     @staticmethod
     def _linux_mem_pct() -> str:
@@ -325,7 +372,7 @@ class BackgroundMonitor(threading.Thread):
                     return str(round(int(parts[2]) * 100 / int(parts[1])))
             return "0"
         except Exception:
-            return "0"
+            return "0"  # Expected probe failure — free command not available
 
     @staticmethod
     def _linux_swap_mb() -> str:
@@ -336,7 +383,7 @@ class BackgroundMonitor(threading.Thread):
                     return line.split()[2]
             return "0"
         except Exception:
-            return "0"
+            return "0"  # Expected probe failure — free -m not available
 
     @staticmethod
     def _nvidia_query(field: str) -> str:
@@ -348,7 +395,7 @@ class BackgroundMonitor(threading.Thread):
             )
             return out.strip().split("\n")[0].strip()
         except Exception:
-            return "N/A"
+            return "N/A"  # Expected probe failure — nvidia-smi not available
 
 
 # ---------------------------------------------------------------------------
@@ -706,6 +753,7 @@ def _run_cmd(cmd: list[str] | str, timeout: int = 10, shell: bool = False) -> st
         )
         return result.stdout.strip()
     except Exception:
+        # Expected probe failure — command may not exist on this platform
         return ""
 
 
@@ -717,15 +765,15 @@ def _detect_macos_hw(log: DiagLog, hw: dict) -> None:
     try:
         kernel = _run_cmd(["sw_vers", "-productVersion"]) or platform.release()
         log.write(f"[HW] kernel={kernel}")
-    except Exception:
-        log.warning("Could not get macOS version")
+    except Exception as e:
+        log.warning(f"Could not get macOS version: {e}")
 
     try:
         cpu_brand = _sysctl("machdep.cpu.brand_string") or "unknown"
         log.write(f"[HW] cpu_brand={cpu_brand}")
         hw["cpu_brand"] = cpu_brand
-    except Exception:
-        log.warning("Could not get CPU brand")
+    except Exception as e:
+        log.warning(f"Could not get CPU brand: {e}")
         hw["cpu_brand"] = "unknown"
 
     try:
@@ -735,16 +783,16 @@ def _detect_macos_hw(log: DiagLog, hw: dict) -> None:
         log.write(f"[HW] cpu_cores_logical={cores_log}")
         hw["cpu_cores_physical"] = _safe_int(cores_phys)
         hw["cpu_cores_logical"] = _safe_int(cores_log)
-    except Exception:
-        log.warning("Could not get CPU core count")
+    except Exception as e:
+        log.warning(f"Could not get CPU core count: {e}")
 
     try:
         freq_max = _sysctl("hw.cpufrequency_max")
         if freq_max:
             freq_mhz = int(freq_max) // 1_000_000
             log.write(f"[HW] cpu_freq_max={freq_mhz} MHz")
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"Could not get CPU max frequency: {e}")
 
     try:
         memsize = _sysctl("hw.memsize")
@@ -756,8 +804,8 @@ def _detect_macos_hw(log: DiagLog, hw: dict) -> None:
             hw["ram_total_gb"] = ram_gb
         else:
             hw["ram_total_gb"] = 0
-    except Exception:
-        log.warning("Could not get RAM size")
+    except Exception as e:
+        log.warning(f"Could not get RAM size: {e}")
         hw["ram_total_gb"] = 0
 
     # GPU from system_profiler
@@ -768,8 +816,8 @@ def _detect_macos_hw(log: DiagLog, hw: dict) -> None:
             stripped = line.strip()
             if any(kw in stripped for kw in ("Chipset", "Total Number", "Metal", "Cores", "Model")):
                 log.write(f"[HW_GPU] {stripped}")
-    except Exception:
-        log.warning("Could not query system_profiler for GPU info")
+    except Exception as e:
+        log.warning(f"Could not query system_profiler for GPU info: {e}")
 
     # Apple Silicon
     try:
@@ -782,7 +830,8 @@ def _detect_macos_hw(log: DiagLog, hw: dict) -> None:
         else:
             log.write("[HW] apple_silicon=false")
             hw["apple_silicon"] = False
-    except Exception:
+    except Exception as e:
+        log.warning(f"Could not determine Apple Silicon status: {e}")
         hw["apple_silicon"] = False
 
     # Cache hierarchy
@@ -795,8 +844,8 @@ def _detect_macos_hw(log: DiagLog, hw: dict) -> None:
         log.write(f"[HW] l2_cache={l2}")
         hw["l1_dcache"] = _safe_int(l1_dc) if l1_dc else 0
         hw["l2_cache"] = _safe_int(l2) if l2 else 0
-    except Exception:
-        log.warning("Could not get cache hierarchy")
+    except Exception as e:
+        log.warning(f"Could not get cache hierarchy: {e}")
 
     # Power state
     try:
@@ -809,15 +858,15 @@ def _detect_macos_hw(log: DiagLog, hw: dict) -> None:
         m = re.search(r"CPU_Speed_Limit\s+(\d+)", therm_out)
         cpu_limit = m.group(1) if m else "unknown"
         log.write(f"[HW_POWER] cpu_speed_limit={cpu_limit}")
-    except Exception:
-        log.warning("Could not get power state")
+    except Exception as e:
+        log.warning(f"Could not get power state: {e}")
 
 
 def _detect_linux_hw(log: DiagLog, hw: dict) -> None:
     try:
         log.write(f"[HW] kernel={platform.release()}")
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"Could not get Linux kernel version: {e}")
 
     # CPU
     try:
@@ -833,8 +882,8 @@ def _detect_linux_hw(log: DiagLog, hw: dict) -> None:
         log.write(f"[HW] cpu_cores_logical={processors}")
         hw["cpu_cores_physical"] = len(core_ids)
         hw["cpu_cores_logical"] = processors
-    except Exception:
-        log.warning("Could not read /proc/cpuinfo")
+    except Exception as e:
+        log.warning(f"Could not read /proc/cpuinfo: {e}")
         hw["cpu_brand"] = "unknown"
 
     # RAM
@@ -847,8 +896,8 @@ def _detect_linux_hw(log: DiagLog, hw: dict) -> None:
             log.write(f"[HW] ram_total_bytes={ram_kb * 1024}")
             log.write(f"[HW] ram_total_gb={ram_gb}")
             hw["ram_total_gb"] = ram_gb
-    except Exception:
-        log.warning("Could not read /proc/meminfo")
+    except Exception as e:
+        log.warning(f"Could not read /proc/meminfo for RAM info: {e}")
         hw["ram_total_gb"] = 0
 
     # GPU
@@ -876,8 +925,8 @@ def _detect_linux_hw(log: DiagLog, hw: dict) -> None:
             hw["gpu_backend"] = "vulkan_or_other"
         else:
             log.write("[HW_GPU] no GPU detected")
-    except Exception:
-        log.warning("Could not detect GPU")
+    except Exception as e:
+        log.warning(f"Could not detect GPU: {e}")
 
     log.write("[HW] apple_silicon=false")
     hw["apple_silicon"] = False
@@ -889,8 +938,8 @@ def _detect_linux_hw(log: DiagLog, hw: dict) -> None:
             if cache_path.exists():
                 size = cache_path.read_text().strip()
                 log.write(f"[HW] l{level}_cache={size}")
-    except Exception:
-        log.warning("Could not get cache hierarchy")
+    except Exception as e:
+        log.warning(f"Could not get Linux cache hierarchy: {e}")
 
     # Thermal
     try:
@@ -901,8 +950,8 @@ def _detect_linux_hw(log: DiagLog, hw: dict) -> None:
                 temp = tz.read_text().strip()
                 zone = tz.parent.name
                 log.write(f"[HW_THERMAL] {zone}={temp}m\u00b0C")
-    except Exception:
-        log.warning("Could not read thermal zones")
+    except Exception as e:
+        log.warning(f"Could not read thermal zones: {e}")
 
     # Power
     try:
@@ -914,8 +963,8 @@ def _detect_linux_hw(log: DiagLog, hw: dict) -> None:
                 ptype = ptype_f.read_text().strip() if ptype_f.exists() else "unknown"
                 status = status_f.read_text().strip() if status_f.exists() else "unknown"
                 log.write(f"[HW_POWER] {ps_dir.name} type={ptype} status={status}")
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"Could not read power supply info: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -939,8 +988,8 @@ def capture_load(label: str, log: DiagLog) -> None:
             parts = cleaned.split()
             if len(parts) >= 3:
                 log.write(f"[LOAD_SNAPSHOT] load_avg={parts[0]} {parts[1]} {parts[2]}")
-    except Exception:
-        log.warning("Could not get load average")
+    except Exception as e:
+        log.warning(f"Could not get load average: {e}")
 
     if plat == "Darwin":
         _capture_load_macos(log)
@@ -952,8 +1001,8 @@ def capture_load(label: str, log: DiagLog) -> None:
         ps_out = _run_cmd(["ps", "aux"])
         count = len(ps_out.splitlines())
         log.write(f"[LOAD_SNAPSHOT] process_count={count}")
-    except Exception:
-        log.write("[LOAD_SNAPSHOT] process_count=unknown")
+    except Exception as e:
+        log.write(f"[LOAD_SNAPSHOT] process_count=unknown (error: {e})")
 
 
 def _capture_load_macos(log: DiagLog) -> None:
@@ -983,8 +1032,8 @@ def _capture_load_macos(log: DiagLog) -> None:
             log.write(f"[LOAD_SNAPSHOT] page_ins={pageins} page_outs={pageouts} swap_used={swap_used}")
             free_mb = (free_pages + inactive_pages) * 4096 // (1024 * 1024)
             log.write(f"[LOAD_SNAPSHOT] approx_free_ram={free_mb} MB")
-    except Exception:
-        log.warning("Could not get vm_stat")
+    except Exception as e:
+        log.warning(f"Could not get vm_stat: {e}")
 
     try:
         mp_out = _run_cmd(["memory_pressure"], timeout=30)
@@ -992,8 +1041,8 @@ def _capture_load_macos(log: DiagLog) -> None:
             if "System-wide" in line:
                 log.write(f"[LOAD_SNAPSHOT] memory_pressure={line.strip()}")
                 break
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"Could not get memory_pressure: {e}")
 
     # Thermal
     try:
@@ -1004,8 +1053,8 @@ def _capture_load_macos(log: DiagLog) -> None:
                 cpu_limit_line = line.strip()
                 break
         log.write(f"[LOAD_SNAPSHOT] thermal={cpu_limit_line or 'no thermal data'}")
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"Could not get thermal data from pmset: {e}")
 
     # GPU utilization via ioreg
     try:
@@ -1016,8 +1065,8 @@ def _capture_load_macos(log: DiagLog) -> None:
                 break
         else:
             log.write("[LOAD_SNAPSHOT] gpu_ioreg=no GPU metrics")
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"Could not get GPU utilization from ioreg: {e}")
 
 
 def _capture_load_linux(log: DiagLog) -> None:
@@ -1041,8 +1090,8 @@ def _capture_load_linux(log: DiagLog) -> None:
             f"[LOAD_SNAPSHOT] swap_total_mb={swap_total // 1024} "
             f"swap_free_mb={swap_free // 1024}"
         )
-    except Exception:
-        log.warning("Could not read /proc/meminfo")
+    except Exception as e:
+        log.warning(f"Could not read /proc/meminfo for load snapshot: {e}")
 
     # NVIDIA GPU
     try:
@@ -1053,8 +1102,8 @@ def _capture_load_linux(log: DiagLog) -> None:
                 "--format=csv,noheader",
             ])
             log.write(f"[LOAD_SNAPSHOT] gpu_util={gpu_out}")
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"Could not query nvidia-smi for GPU utilization: {e}")
 
     # CPU temp
     try:
@@ -1062,8 +1111,8 @@ def _capture_load_linux(log: DiagLog) -> None:
         if temp_path.exists():
             temp = temp_path.read_text().strip()
             log.write(f"[LOAD_SNAPSHOT] cpu_temp={temp}m\u00b0C")
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"Could not read CPU temperature: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -1100,8 +1149,8 @@ def _run_subprocess(
         log.warning(f"Command timed out after {timeout}s: {' '.join(cmd[:4])}...")
         try:
             proc.kill()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"Could not kill timed-out process: {e}")
         return "", -1
     except Exception as e:
         log.warning(f"Command failed: {e}")
@@ -1315,8 +1364,8 @@ def section_2_system_load_pre(log: DiagLog) -> None:
         data_lines.sort(key=lambda x: float(x.split()[0]) if x.split() else 0, reverse=True)
         for line in data_lines[:10]:
             log.write(f"[LOAD_TOP] {line}")
-    except Exception:
-        log.warning("Could not get top CPU consumers")
+    except Exception as e:
+        log.warning(f"Could not get top CPU consumers: {e}")
 
     # Disk I/O
     log.subsection("Disk I/O")
@@ -1325,8 +1374,8 @@ def section_2_system_load_pre(log: DiagLog) -> None:
             io_out = _run_cmd(["iostat", "-c", "1"], timeout=10)
             for line in io_out.splitlines()[:5]:
                 log.write(f"[LOAD_IO] {line}")
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"Could not get disk I/O stats from iostat: {e}")
 
     # GPU-using processes
     log.subsection("GPU-using processes")
@@ -1340,8 +1389,8 @@ def section_2_system_load_pre(log: DiagLog) -> None:
                     found = True
             if not found:
                 log.write("[LOAD_GPU_PROC] none detected")
-        except Exception:
-            log.write("[LOAD_GPU_PROC] none detected")
+        except Exception as e:
+            log.warning(f"Could not detect GPU-using processes on macOS: {e}")
     elif plat == "Linux" and shutil.which("nvidia-smi"):
         try:
             gpu_procs = _run_cmd([
@@ -1353,8 +1402,8 @@ def section_2_system_load_pre(log: DiagLog) -> None:
                     log.write(f"[LOAD_GPU_PROC] {line.strip()}")
             else:
                 log.write("[LOAD_GPU_PROC] none detected")
-        except Exception:
-            log.write("[LOAD_GPU_PROC] none detected")
+        except Exception as e:
+            log.warning(f"Could not query nvidia-smi for GPU processes: {e}")
 
     # Model mmap check will be done in section 3
 
@@ -1398,14 +1447,26 @@ def section_3_model_info(
     try:
         file_size = os.path.getsize(model)
         log.write(f"[MODEL] filesize_bytes={file_size}")
-    except Exception:
+    except Exception as e:
+        log.warning(f"Could not get model file size: {e}")
         log.write("[MODEL] filesize_bytes=0")
 
-    # Model mmap check
-    log.subsection("Model file mmap check")
+    # Model mmap + storage check
+    log.subsection("Model storage and mmap check")
     log.write(f"[MMAP] model_path={model}")
 
     plat = detect_platform()
+
+    # SSD detection — model on spinning disk kills mmap performance
+    try:
+        ssd_status = detect_storage_type(model, plat)
+        log.write(f"[STORAGE] type={ssd_status}")
+        if ssd_status == "hdd":
+            log.warning("Model is on spinning disk (HDD). mmap performance will be degraded.")
+    except Exception as e:
+        log.warning(f"Could not detect storage type: {e}")
+        log.write("[STORAGE] type=unknown")
+
     if plat == "Darwin":
         try:
             model_size = os.path.getsize(model)
@@ -1422,8 +1483,8 @@ def section_3_model_info(
                 f"[MMAP] model_size_vs_free_ram={model_mb:.0f} MB model, "
                 f"{free_mb:.0f} MB free"
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"Could not compute model size vs free RAM: {e}")
 
 
 def section_4_gpu_capabilities(
@@ -1481,8 +1542,8 @@ def section_4_gpu_capabilities(
                 ])
                 for line in cuda_out.splitlines():
                     log.write(f"[CUDA] {line.strip()}")
-            except Exception:
-                log.write("[CUDA] nvidia-smi query failed")
+            except Exception as e:
+                log.write(f"[CUDA] nvidia-smi query failed: {e}")
         else:
             log.write("[CUDA] nvidia-smi not found \u2014 CUDA may not be available")
 
@@ -1533,8 +1594,8 @@ def section_5_build_validation(
                     break
         if not found:
             log.write("WARNING: Could not verify Metal library load")
-    except Exception:
-        log.write("WARNING: Metal library validation failed")
+    except Exception as e:
+        log.write(f"WARNING: Metal library validation failed: {e}")
 
     # Git commit
     log.subsection("Build commit")
@@ -1544,8 +1605,8 @@ def section_5_build_validation(
             log.write(f"[BUILD] {commit}")
         else:
             log.write("[BUILD] not a git repo")
-    except Exception:
-        log.write("[BUILD] not a git repo")
+    except Exception as e:
+        log.write(f"[BUILD] not a git repo (error: {e})")
 
 
 def section_6_prefill(
@@ -1846,8 +1907,8 @@ def section_12_post_load(log: DiagLog) -> None:
             if int(limit) < 100:
                 log.write(f"[THERMAL] WARNING: CPU speed limited to {limit}%. Results may be throttled.")
                 log.write("[THERMAL] WARNING: Run benchmarks again after cooling down for accurate results.")
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"Could not check post-benchmark thermal state on macOS: {e}")
     elif plat == "Linux":
         try:
             temp_path = Path("/sys/class/thermal/thermal_zone0/temp")
@@ -1856,8 +1917,8 @@ def section_12_post_load(log: DiagLog) -> None:
                 log.write(f"[THERMAL] final_cpu_temp={temp}m\u00b0C")
                 if _safe_int(temp) > 90000:
                     log.write("[THERMAL] WARNING: CPU temperature above 90\u00b0C. Results may be thermally throttled.")
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"Could not check post-benchmark thermal state on Linux: {e}")
 
 
 def section_13_summary(
@@ -1969,6 +2030,7 @@ def build_json_profile(
     try:
         profile["model_size_bytes"] = os.path.getsize(model)
     except Exception:
+        # No log available here; model_size_bytes stays 0 (set in profile init)
         pass
 
     return profile
@@ -2027,8 +2089,8 @@ def package_results(
             os.remove(profile_path)
         if os.path.isfile(monitor.csv_path):
             os.remove(monitor.csv_path)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"Could not clean up temp files: {e}")
 
     log.write("")
     log.write("=" * 44)
@@ -2158,7 +2220,7 @@ def main() -> int:
             log.write("")
             log.write("[WARNING] Interrupted by user (Ctrl+C)")
         except Exception:
-            pass
+            pass  # Log file may already be closed during shutdown
         monitor.stop()
         display.stop()
         sys.exit(130)
@@ -2190,7 +2252,8 @@ def main() -> int:
         else:
             size_str = f"{model_size}"
         log.write(f"TURBO_DIAG_MODEL_SIZE={size_str}")
-    except Exception:
+    except Exception as e:
+        log.warning(f"Could not determine model file size: {e}")
         log.write("TURBO_DIAG_MODEL_SIZE=unknown")
 
     # Start background monitor
@@ -2199,7 +2262,8 @@ def main() -> int:
     # Record initial swap for anomaly detection
     try:
         initial_swap = float(monitor._poll().get("swap_used_mb", "0"))
-    except Exception:
+    except Exception as e:
+        log.warning(f"Could not read initial swap usage: {e}")
         initial_swap = 0.0
 
     # Start live display
@@ -2270,8 +2334,8 @@ def main() -> int:
         if not _interrupted:
             try:
                 log.write(f"[MONITOR] Captured {monitor.sample_count} samples in {monitor.csv_path}")
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning(f"Could not write monitor summary: {e}")
 
     # Build JSON profile
     profile_json = build_json_profile(hw, model, gpu_init, date_str)
