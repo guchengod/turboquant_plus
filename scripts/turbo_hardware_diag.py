@@ -49,8 +49,8 @@ try:
     from rich.text import Text
 
     HAS_RICH = True
-except ImportError:
-    HAS_RICH = False
+except ImportError:  # pragma: no cover
+    HAS_RICH = False  # pragma: no cover
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -387,13 +387,29 @@ class BackgroundMonitor(threading.Thread):
 
     @staticmethod
     def _nvidia_query(field: str) -> str:
+        """Query nvidia-smi. For multi-GPU, returns sum/max/first depending on field."""
         try:
             out = subprocess.check_output(
                 ["nvidia-smi", f"--query-gpu={field}",
                  "--format=csv,noheader,nounits"],
                 text=True, timeout=5,
             )
-            return out.strip().split("\n")[0].strip()
+            lines = [l.strip() for l in out.strip().split("\n") if l.strip()]
+            if not lines:
+                return "N/A"
+            if len(lines) == 1:
+                return lines[0]
+            # Multi-GPU: aggregate sensibly
+            try:
+                vals = [float(v) for v in lines]
+                if "memory" in field or "util" in field:
+                    return str(int(sum(vals)))  # Sum memory/utilization across GPUs
+                elif "temp" in field:
+                    return str(int(max(vals)))  # Max temperature (hottest GPU)
+                else:
+                    return lines[0]  # Default: first GPU
+            except ValueError:
+                return ";".join(lines)  # Non-numeric: join all
         except Exception:
             return "N/A"  # Expected probe failure — nvidia-smi not available
 
@@ -1453,7 +1469,7 @@ def section_3_model_info(
 
     # Model mmap + storage check
     log.subsection("Model storage and mmap check")
-    log.write(f"[MMAP] model_path={model}")
+    log.write(f"[MMAP] model_file={os.path.basename(model)}")  # basename only — no PII from path
 
     plat = detect_platform()
 
@@ -1985,7 +2001,9 @@ def section_13_summary(
     log.write("   its recommendedMaxWorkingSetSize, swap pressure kills decode.")
     log.write("")
     log.write("NEXT STEPS:")
-    log.write("  Send this file to the TurboQuant team for analysis.")
+    log.write("  1. Open a GitHub issue: github.com/TheTom/turboquant_plus/issues")
+    log.write("     Title: 'Diagnostic: [your hardware]', attach the zip file.")
+    log.write("  2. Or DM @no_stp_on_snek on X/Twitter with the zip.")
     log.write("  If decode ratio < 0.50x at any depth, use TURBO_LAYER_ADAPTIVE=2")
     log.write("  or q8_0 cache until the M1 constant cache fix is available.")
     log.write("")
@@ -2082,8 +2100,10 @@ def package_results(
                 zf.write(profile_path, os.path.basename(profile_path))
     except Exception as e:
         log.warning(f"Could not create zip: {e}")
+        log.write(f"Raw artifacts preserved at: {output_dir}")
+        return ""  # Don't cleanup if zip failed
 
-    # Cleanup temp files
+    # Cleanup temp files only if zip was created successfully
     try:
         if os.path.isfile(profile_path):
             os.remove(profile_path)
@@ -2103,7 +2123,7 @@ def package_results(
     log.write(f"    {os.path.basename(monitor.csv_path)}")
     log.write(f"    {profile_name}")
     log.write("")
-    log.write("  Send this zip file to the TurboQuant team.")
+    log.write("  Share: github.com/TheTom/turboquant_plus/issues or DM @no_stp_on_snek on X")
     log.write("")
 
     return zip_path
@@ -2122,7 +2142,8 @@ def main() -> int:
               python3 turbo_hardware_diag.py --model model.gguf --llama-dir /path/to/llama.cpp
               python3 turbo_hardware_diag.py --skip-ppl --verbose
 
-            Output: turbo-diag-<date>.zip (send this to the TurboQuant team)
+            Output: turbo-diag-<date>.zip
+              Share via: github.com/TheTom/turboquant_plus/issues or DM @no_stp_on_snek
               Contains .txt log, .json profile, .csv background monitor data.
 
             NO PII is collected. Only hardware specs, load stats, and benchmark numbers.
@@ -2184,11 +2205,20 @@ def main() -> int:
     cli_bin = os.path.join(llama_dir, "build", "bin", "llama-cli")
     wiki_path = os.path.join(llama_dir, "wikitext-2-raw", "wiki.test.raw")
 
-    for tool in (bench_bin, perpl_bin, cli_bin):
+    # Required tools — perplexity only needed if PPL not skipped
+    required_tools = [bench_bin, cli_bin]
+    if not args.skip_ppl:
+        required_tools.append(perpl_bin)
+
+    for tool in required_tools:
         if not os.path.isfile(tool):
             print(f"ERROR: {tool} not found. Build llama.cpp first:")
             print(f"  cd {llama_dir}")
-            print("  cmake -B build -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DCMAKE_BUILD_TYPE=Release")
+            plat = platform.system()
+            if plat == "Darwin":
+                print("  cmake -B build -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DCMAKE_BUILD_TYPE=Release")
+            else:
+                print("  cmake -B build -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release")
             print("  cmake --build build -j")
             return 1
 
@@ -2213,7 +2243,7 @@ def main() -> int:
     # Graceful shutdown on Ctrl+C
     _interrupted = False
 
-    def _signal_handler(signum: int, frame: object) -> None:
+    def _signal_handler(signum: int, frame: object) -> None:  # pragma: no cover
         nonlocal _interrupted
         _interrupted = True
         try:
@@ -2324,9 +2354,12 @@ def main() -> int:
         section_13_summary(log, anomaly_detector)
 
     except Exception as e:
+        _had_error = True
         log.write(f"\n[ERROR] Unhandled exception: {e}")
         import traceback
         log.write(traceback.format_exc())
+    else:
+        _had_error = False
     finally:
         # Stop display + monitor (guard against interrupted state)
         display.stop()
@@ -2345,8 +2378,8 @@ def main() -> int:
 
     log.close()
 
-    return 0
+    return 1 if _had_error else 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main())  # pragma: no cover

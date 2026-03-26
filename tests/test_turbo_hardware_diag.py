@@ -2484,7 +2484,7 @@ class TestMainFunction:
                 "side_effect": RuntimeError("boom"),
             },
         })
-        assert rc == 0
+        assert rc == 1  # Non-zero on unhandled exception
 
     def test_main_auto_find_model(self, tmp_path):
         llama_dir = _setup_llama_dir(tmp_path)
@@ -2959,3 +2959,466 @@ class TestExceptPaths:
         content = (tmp_path / "test.txt").read_text()
         assert "final_cpu_speed_limit=100" in content
         assert "WARNING" not in content.split("final_cpu_speed_limit")[1]
+
+
+# ============================================================
+# Coverage gap closers — exception handlers and missed paths
+# ============================================================
+class TestCoverageGapClosers:
+    """Tests to close the remaining 3% coverage gap."""
+
+    # --- Line 833-835: Apple Silicon detection failure ---
+    def test_apple_silicon_detection_exception(self, tmp_path):
+        """Cover except branch when Apple Silicon detection raises."""
+        log = _make_log(tmp_path)
+
+        # Use a dict subclass that raises on .get() to trigger the except
+        class BadDict(dict):
+            def get(self, key, default=None):
+                if key == "cpu_brand":
+                    raise Exception("cpu_brand read failed")
+                return super().get(key, default)
+
+        bad_hw = BadDict()
+
+        with patch("turbo_hardware_diag._run_cmd", return_value=""):
+            thd._detect_macos_hw(log, bad_hw)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "Could not determine Apple Silicon status" in content
+        assert bad_hw["apple_silicon"] is False
+
+    # --- Line 868-869: Linux kernel version failure ---
+    def test_linux_kernel_version_exception(self, tmp_path):
+        """Cover except when platform.release() raises in _detect_linux_hw."""
+        log = _make_log(tmp_path)
+        hw = {}
+        with patch("platform.release", side_effect=Exception("kernel read failed")), \
+             patch("pathlib.Path.read_text", return_value="model name : AMD EPYC\ncore id : 0\nprocessor : 0\n"), \
+             patch("pathlib.Path.exists", return_value=False), \
+             patch("pathlib.Path.is_dir", return_value=False), \
+             patch("shutil.which", return_value=None), \
+             patch("turbo_hardware_diag._run_cmd", return_value=""):
+            thd._detect_linux_hw(log, hw)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "Could not get Linux kernel version" in content
+
+    # --- Line 928-929: Linux GPU detection failure ---
+    def test_linux_gpu_detection_exception(self, tmp_path):
+        """Cover except when GPU detection raises in _detect_linux_hw."""
+        log = _make_log(tmp_path)
+        hw = {}
+
+        call_count = {"n": 0}
+        original_read_text = Path.read_text
+
+        def patched_read_text(self, *a, **kw):
+            # Let /proc/cpuinfo work, but raise for GPU vendor files
+            if "cpuinfo" in str(self):
+                return "model name : AMD EPYC\ncore id : 0\nprocessor : 0\n"
+            raise Exception("gpu read failed")
+
+        def patched_which(cmd):
+            if cmd == "lspci":
+                return "/usr/bin/lspci"
+            if cmd == "nvidia-smi":
+                return "/usr/bin/nvidia-smi"
+            return None
+
+        def patched_run_cmd(cmd, **kwargs):
+            if isinstance(cmd, list) and cmd[0] == "nvidia-smi":
+                raise Exception("nvidia-smi failed for GPU detection")
+            if isinstance(cmd, list) and cmd[0] == "lspci":
+                raise Exception("lspci failed")
+            return ""
+
+        with patch("pathlib.Path.read_text", patched_read_text), \
+             patch("pathlib.Path.exists", return_value=False), \
+             patch("pathlib.Path.is_dir", return_value=False), \
+             patch("shutil.which", side_effect=patched_which), \
+             patch("turbo_hardware_diag._run_cmd", side_effect=patched_run_cmd), \
+             patch("platform.release", return_value="6.1.0"):
+            thd._detect_linux_hw(log, hw)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "Could not detect GPU" in content
+
+    # --- Line 941-942: Linux cache hierarchy failure ---
+    def test_linux_cache_hierarchy_exception(self, tmp_path):
+        """Cover except when cache hierarchy read raises in _detect_linux_hw."""
+        log = _make_log(tmp_path)
+        hw = {}
+
+        exists_calls = {"n": 0}
+
+        def patched_exists(self):
+            s = str(self)
+            if "cache/index" in s:
+                raise Exception("cache read failed")
+            return False
+
+        with patch("pathlib.Path.read_text", return_value="model name : AMD EPYC\ncore id : 0\nprocessor : 0\n"), \
+             patch("pathlib.Path.exists", patched_exists), \
+             patch("pathlib.Path.is_dir", return_value=False), \
+             patch("shutil.which", return_value=None), \
+             patch("turbo_hardware_diag._run_cmd", return_value=""), \
+             patch("platform.release", return_value="6.1.0"):
+            thd._detect_linux_hw(log, hw)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "Could not get Linux cache hierarchy" in content
+
+    # --- Line 953-954: Linux thermal zone failure ---
+    def test_linux_thermal_zone_exception(self, tmp_path):
+        """Cover except when thermal zone read raises in _detect_linux_hw."""
+        log = _make_log(tmp_path)
+        hw = {}
+
+        def patched_is_dir(self):
+            if "thermal" in str(self):
+                raise Exception("thermal read failed")
+            return False
+
+        with patch("pathlib.Path.read_text", return_value="model name : AMD EPYC\ncore id : 0\nprocessor : 0\n"), \
+             patch("pathlib.Path.exists", return_value=False), \
+             patch("pathlib.Path.is_dir", patched_is_dir), \
+             patch("shutil.which", return_value=None), \
+             patch("turbo_hardware_diag._run_cmd", return_value=""), \
+             patch("platform.release", return_value="6.1.0"):
+            thd._detect_linux_hw(log, hw)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "Could not read thermal zones" in content
+
+    # --- Line 966-967: Linux power supply failure ---
+    def test_linux_power_supply_exception(self, tmp_path):
+        """Cover except when power supply read raises in _detect_linux_hw."""
+        log = _make_log(tmp_path)
+        hw = {}
+
+        def patched_is_dir(self):
+            if "power_supply" in str(self):
+                raise Exception("power supply read failed")
+            if "thermal" in str(self):
+                return False
+            return False
+
+        with patch("pathlib.Path.read_text", return_value="model name : AMD EPYC\ncore id : 0\nprocessor : 0\n"), \
+             patch("pathlib.Path.exists", return_value=False), \
+             patch("pathlib.Path.is_dir", patched_is_dir), \
+             patch("shutil.which", return_value=None), \
+             patch("turbo_hardware_diag._run_cmd", return_value=""), \
+             patch("platform.release", return_value="6.1.0"):
+            thd._detect_linux_hw(log, hw)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "Could not read power supply info" in content
+
+    # --- Line 1105-1106: nvidia-smi GPU utilization failure ---
+    def test_capture_load_linux_nvidia_smi_exception(self, tmp_path):
+        """Cover except when nvidia-smi GPU util raises in _capture_load_linux."""
+        log = _make_log(tmp_path)
+
+        def patched_run_cmd(cmd, **kwargs):
+            if isinstance(cmd, list) and cmd[0] == "nvidia-smi":
+                raise Exception("nvidia-smi failed")
+            return ""
+
+        with patch("pathlib.Path.read_text", return_value="MemFree: 1000 kB\nMemAvailable: 2000 kB\nSwapTotal: 500 kB\nSwapFree: 500 kB\n"), \
+             patch("pathlib.Path.exists", return_value=False), \
+             patch("shutil.which", return_value="/usr/bin/nvidia-smi"), \
+             patch("turbo_hardware_diag._run_cmd", side_effect=patched_run_cmd):
+            thd._capture_load_linux(log)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "Could not query nvidia-smi for GPU utilization" in content
+
+    # --- Line 1114-1115: Linux CPU temperature failure ---
+    def test_capture_load_linux_cpu_temp_exception(self, tmp_path):
+        """Cover except when CPU temp read raises in _capture_load_linux."""
+        log = _make_log(tmp_path)
+
+        def patched_exists(self):
+            if "thermal_zone0" in str(self):
+                return True
+            return False
+
+        def patched_read_text(self, *a, **kw):
+            if "thermal_zone0" in str(self):
+                raise Exception("temp read failed")
+            if "meminfo" in str(self):
+                return "MemFree: 1000 kB\nMemAvailable: 2000 kB\nSwapTotal: 500 kB\nSwapFree: 500 kB\n"
+            return ""
+
+        with patch("pathlib.Path.read_text", patched_read_text), \
+             patch("pathlib.Path.exists", patched_exists), \
+             patch("shutil.which", return_value=None), \
+             patch("turbo_hardware_diag._run_cmd", return_value=""):
+            thd._capture_load_linux(log)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "Could not read CPU temperature" in content
+
+    # --- Line 1260: continue for non-pipe lines in parse_bench_tps ---
+    def test_parse_bench_tps_skips_non_pipe_lines(self):
+        """Cover the continue branch for lines not starting with |."""
+        mixed = "header line\nnot a pipe\n" + MOCK_BENCH_OUTPUT_Q8
+        results = thd.parse_bench_tps(mixed)
+        assert len(results) == 1
+        assert results[0]["tps"] == 85.83
+
+    # --- Line 1366: [LOAD_TOP] writing ---
+    def test_section_2_load_top_writing(self, tmp_path):
+        """Cover the [LOAD_TOP] write path in section_2."""
+        log = _make_log(tmp_path)
+        ps_output = "%CPU COMM\n25.0 /usr/bin/python3\n10.0 /usr/sbin/syslogd\n"
+        with patch("turbo_hardware_diag.capture_load"), \
+             patch("turbo_hardware_diag._run_cmd", return_value=ps_output), \
+             patch("turbo_hardware_diag.detect_platform", return_value="Darwin"), \
+             patch("shutil.which", return_value=None):
+            thd.section_2_system_load_pre(log)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "[LOAD_TOP]" in content
+
+    # --- Line 1377-1378: iostat failure ---
+    def test_section_2_iostat_exception(self, tmp_path):
+        """Cover except when iostat raises in section_2."""
+        log = _make_log(tmp_path)
+
+        def patched_run_cmd(cmd, **kwargs):
+            if isinstance(cmd, list) and cmd[0] == "iostat":
+                raise Exception("iostat failed")
+            return ""
+
+        with patch("turbo_hardware_diag.capture_load"), \
+             patch("turbo_hardware_diag._run_cmd", side_effect=patched_run_cmd), \
+             patch("turbo_hardware_diag.detect_platform", return_value="Darwin"), \
+             patch("shutil.which", return_value="/usr/sbin/iostat"):
+            thd.section_2_system_load_pre(log)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "Could not get disk I/O stats from iostat" in content
+
+    # --- Line 1404-1406: nvidia-smi process query failure + "none detected" ---
+    def test_section_2_linux_nvidia_smi_procs_exception(self, tmp_path):
+        """Cover except when nvidia-smi process query raises."""
+        log = _make_log(tmp_path)
+
+        call_n = {"n": 0}
+        def patched_run_cmd(cmd, **kwargs):
+            if isinstance(cmd, list) and "query-compute-apps" in str(cmd):
+                raise Exception("nvidia-smi query failed")
+            return ""
+
+        def patched_which(cmd):
+            if cmd == "nvidia-smi":
+                return "/usr/bin/nvidia-smi"
+            return None
+
+        with patch("turbo_hardware_diag.capture_load"), \
+             patch("turbo_hardware_diag._run_cmd", side_effect=patched_run_cmd), \
+             patch("turbo_hardware_diag.detect_platform", return_value="Linux"), \
+             patch("shutil.which", side_effect=patched_which):
+            thd.section_2_system_load_pre(log)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "Could not query nvidia-smi for GPU processes" in content
+
+    def test_section_2_linux_nvidia_smi_procs_none_detected(self, tmp_path):
+        """Cover the 'none detected' path when nvidia-smi returns empty."""
+        log = _make_log(tmp_path)
+
+        call_n = {"n": 0}
+        def patched_run_cmd(cmd, **kwargs):
+            if isinstance(cmd, list) and "query-compute-apps" in str(cmd):
+                return ""  # empty = no GPU processes
+            return ""
+
+        def patched_which(cmd):
+            if cmd == "nvidia-smi":
+                return "/usr/bin/nvidia-smi"
+            return None
+
+        with patch("turbo_hardware_diag.capture_load"), \
+             patch("turbo_hardware_diag._run_cmd", side_effect=patched_run_cmd), \
+             patch("turbo_hardware_diag.detect_platform", return_value="Linux"), \
+             patch("shutil.which", side_effect=patched_which):
+            thd.section_2_system_load_pre(log)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "[LOAD_GPU_PROC] none detected" in content
+
+    # --- Line 1545-1546: CUDA nvidia-smi query failure ---
+    def test_section_4_cuda_nvidia_smi_exception(self, tmp_path):
+        """Cover except when nvidia-smi CUDA query raises in section_4."""
+        log = _make_log(tmp_path)
+        with patch("subprocess.run") as mock_run, \
+             patch("turbo_hardware_diag.detect_platform", return_value="Linux"), \
+             patch("shutil.which", return_value="/usr/bin/nvidia-smi"), \
+             patch("turbo_hardware_diag._run_cmd", side_effect=Exception("nvidia-smi cuda failed")):
+            mock_run.return_value = _make_completed_process(
+                stdout="build: 1234\n", stderr=""
+            )
+            thd.section_4_gpu_capabilities(log, "/fake/cli", "/fake/model.gguf")
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "[CUDA] nvidia-smi query failed" in content
+
+    # --- Line 1608-1609: git repo detection failure ---
+    def test_section_5_git_repo_exception(self, tmp_path):
+        """Cover except when git log raises in section_5."""
+        log = _make_log(tmp_path)
+
+        def patched_run_cmd(cmd, **kwargs):
+            if isinstance(cmd, list) and cmd[0] == "git":
+                raise Exception("git failed")
+            return ""
+
+        with patch("subprocess.run") as mock_run, \
+             patch("turbo_hardware_diag._run_cmd", side_effect=patched_run_cmd):
+            mock_run.return_value = _make_completed_process(stdout="turbo3 test passed")
+            thd.section_5_build_validation(log, "/fake/bench", "/fake/cli", "/fake/model.gguf", "/fake/llama")
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "[BUILD] not a git repo (error:" in content
+
+    # --- Line 1910-1911: macOS post-benchmark thermal failure ---
+    def test_section_12_darwin_thermal_exception(self, tmp_path):
+        """Cover except when macOS thermal check raises in section_12."""
+        log = _make_log(tmp_path)
+        with patch("turbo_hardware_diag.capture_load"), \
+             patch("turbo_hardware_diag.detect_platform", return_value="Darwin"), \
+             patch("turbo_hardware_diag._run_cmd", side_effect=Exception("pmset failed")):
+            thd.section_12_post_load(log)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "Could not check post-benchmark thermal state on macOS" in content
+
+    # --- Line 1920-1921: Linux post-benchmark thermal failure ---
+    def test_section_12_linux_thermal_exception(self, tmp_path):
+        """Cover except when Linux thermal check raises in section_12."""
+        log = _make_log(tmp_path)
+
+        def patched_exists(self):
+            if "thermal_zone0" in str(self):
+                raise Exception("thermal read failed")
+            return False
+
+        with patch("turbo_hardware_diag.capture_load"), \
+             patch("turbo_hardware_diag.detect_platform", return_value="Linux"), \
+             patch("pathlib.Path.exists", patched_exists):
+            thd.section_12_post_load(log)
+        log.close()
+        content = (tmp_path / "test.txt").read_text()
+        assert "Could not check post-benchmark thermal state on Linux" in content
+
+    # --- Line 2196-2197: Model file not found in main() ---
+    def test_main_model_file_not_found(self, tmp_path):
+        """Cover the model-not-found early return in main()."""
+        llama_dir = _setup_llama_dir(tmp_path)
+        # Model file doesn't exist
+        argv = ["prog", str(llama_dir), "/nonexistent/model.gguf",
+                "-o", str(tmp_path / "output")]
+        with patch("sys.argv", argv), \
+             patch("builtins.print"):
+            rc = thd.main()
+        assert rc == 1
+
+    # --- Line 2265-2267: Initial swap read failure ---
+    def test_main_initial_swap_read_failure(self, tmp_path):
+        """Cover the except when _poll raises for initial swap."""
+        llama_dir = _setup_llama_dir(tmp_path)
+        model = tmp_path / "model.gguf"
+        model.write_text("fake")
+        argv = ["prog", str(llama_dir), str(model),
+                "--skip-ppl", "--skip-stress", "-o", str(tmp_path / "output")]
+
+        from contextlib import ExitStack
+
+        section_patches = {
+            "turbo_hardware_diag.section_1_hardware_inventory": {"return_value": {}},
+            "turbo_hardware_diag.section_2_system_load_pre": {},
+            "turbo_hardware_diag.section_3_model_info": {},
+            "turbo_hardware_diag.section_4_gpu_capabilities": {"return_value": ""},
+            "turbo_hardware_diag.section_5_build_validation": {},
+            "turbo_hardware_diag.section_6_prefill": {},
+            "turbo_hardware_diag.section_7_decode": {},
+            "turbo_hardware_diag.section_9_combined": {},
+            "turbo_hardware_diag.section_10_perplexity": {},
+            "turbo_hardware_diag.section_11_memory": {},
+            "turbo_hardware_diag.section_12_post_load": {},
+            "turbo_hardware_diag.section_13_summary": {},
+            "turbo_hardware_diag.build_json_profile": {"return_value": {"v": 5}},
+            "turbo_hardware_diag.package_results": {"return_value": "out.zip"},
+            "os.path.getsize": {"return_value": 1024},
+        }
+
+        with ExitStack() as stack:
+            stack.enter_context(patch("sys.argv", argv))
+            for target, kwargs in section_patches.items():
+                stack.enter_context(patch(target, **kwargs))
+            stack.enter_context(patch.object(thd.BackgroundMonitor, "start"))
+            stack.enter_context(patch.object(thd.BackgroundMonitor, "stop"))
+            # _poll raises so initial_swap except is triggered
+            stack.enter_context(patch.object(
+                thd.BackgroundMonitor, "_poll",
+                side_effect=Exception("poll failed"),
+            ))
+            stack.enter_context(patch.object(
+                thd.BackgroundMonitor, "sample_count",
+                new_callable=PropertyMock, return_value=0,
+            ))
+            stack.enter_context(patch.object(thd.LiveDisplay, "start"))
+            stack.enter_context(patch.object(thd.LiveDisplay, "stop"))
+            rc = thd.main()
+        assert rc == 0
+
+    # --- Line 2337-2338: Monitor summary write failure ---
+    def test_main_monitor_summary_write_failure(self, tmp_path):
+        """Cover except when writing monitor summary raises in main()."""
+        llama_dir = _setup_llama_dir(tmp_path)
+        model = tmp_path / "model.gguf"
+        model.write_text("fake")
+        argv = ["prog", str(llama_dir), str(model),
+                "--skip-ppl", "--skip-stress", "-o", str(tmp_path / "output")]
+
+        from contextlib import ExitStack
+
+        section_patches = {
+            "turbo_hardware_diag.section_1_hardware_inventory": {"return_value": {}},
+            "turbo_hardware_diag.section_2_system_load_pre": {},
+            "turbo_hardware_diag.section_3_model_info": {},
+            "turbo_hardware_diag.section_4_gpu_capabilities": {"return_value": ""},
+            "turbo_hardware_diag.section_5_build_validation": {},
+            "turbo_hardware_diag.section_6_prefill": {},
+            "turbo_hardware_diag.section_7_decode": {},
+            "turbo_hardware_diag.section_9_combined": {},
+            "turbo_hardware_diag.section_10_perplexity": {},
+            "turbo_hardware_diag.section_11_memory": {},
+            "turbo_hardware_diag.section_12_post_load": {},
+            "turbo_hardware_diag.section_13_summary": {},
+            "turbo_hardware_diag.build_json_profile": {"return_value": {"v": 5}},
+            "turbo_hardware_diag.package_results": {"return_value": "out.zip"},
+            "os.path.getsize": {"return_value": 1024},
+        }
+
+        with ExitStack() as stack:
+            stack.enter_context(patch("sys.argv", argv))
+            for target, kwargs in section_patches.items():
+                stack.enter_context(patch(target, **kwargs))
+            stack.enter_context(patch.object(thd.BackgroundMonitor, "start"))
+            stack.enter_context(patch.object(thd.BackgroundMonitor, "stop"))
+            stack.enter_context(patch.object(
+                thd.BackgroundMonitor, "_poll", return_value=_MOCK_POLL_SAMPLE
+            ))
+            # sample_count property raises to trigger the monitor summary except
+            stack.enter_context(patch.object(
+                thd.BackgroundMonitor, "sample_count",
+                new_callable=PropertyMock, side_effect=Exception("sample_count failed"),
+            ))
+            stack.enter_context(patch.object(thd.LiveDisplay, "start"))
+            stack.enter_context(patch.object(thd.LiveDisplay, "stop"))
+            rc = thd.main()
+        assert rc == 0

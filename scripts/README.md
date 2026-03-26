@@ -7,6 +7,7 @@ Hardware profiling, benchmarking, and quality validation for TurboQuant cache ty
 ## Quick Start
 
 ```bash
+# Clone and run — one command
 bash scripts/turbo-diag /path/to/llama.cpp /path/to/model.gguf
 ```
 
@@ -18,6 +19,54 @@ That's it. The launcher automatically:
 **Estimated runtime:** 20–40 minutes depending on hardware. Use `--skip-ppl` and `--skip-stress` to cut that roughly in half.
 
 **Requirements:** Python 3.10+, a built llama.cpp with turbo3 support, and a `.gguf` model file.
+
+## How It Runs
+
+```
+                        turbo-diag
+                            |
+              +-------------+-------------+
+              |                           |
+         Creates venv              Installs rich
+      (.turbo-diag-venv/)          (optional UI)
+              |                           |
+              +-------------+-------------+
+                            |
+                 turbo_hardware_diag.py
+                            |
+         +------------------+------------------+
+         |                  |                  |
+   Detect Hardware    Start Monitor      Start Display
+   (CPU/GPU/RAM)     (10s CSV poll)    (rich or ASCII)
+         |                  |                  |
+         +------------------+------------------+
+                            |
+              Run 13 Diagnostic Sections
+              +---------------------------------+
+              |  1. Hardware Inventory           |
+              |  2. System Load (pre)            |
+              |  3. Model Info                   |
+              |  4. GPU Capabilities             |
+              |  5. Build Validation             |
+              |  6. Prefill Speed (5 depths)     |  <-- llama-bench
+              |  7. Decode Speed (5 depths)      |  <-- llama-bench
+              |  8. Stress Test (11 depths)      |  <-- llama-bench
+              |  9. Combined Workload            |  <-- llama-bench
+              | 10. Perplexity (quality gate)    |  <-- llama-perplexity
+              | 11. Memory Breakdown             |  <-- llama-cli
+              | 12. System Load (post)           |
+              | 13. Summary + Anomaly Report     |
+              +---------------------------------+
+                            |
+              +-------------+-------------+
+              |             |             |
+         .txt log     .json profile  .csv monitor
+              |             |             |
+              +-------------+-------------+
+                            |
+                     turbo-diag-*.zip
+                    (send this to us!)
+```
 
 ---
 
@@ -321,9 +370,31 @@ bash scripts/turbo-realworld-bench.sh [path-to-pdf]
 
 **Requirements:** A long PDF file (not included in repo), `pdftotext` (from poppler), and a built llama.cpp with turbo3 support. Configure via `LLAMA`, `MODEL`, `PORT_BASE`, `THREADS`, and `MAX_TOKENS` env vars.
 
-### turbo-hardware-diag.sh (legacy)
+---
 
-The original bash implementation of the hardware diagnostic (v3). **Superseded by `turbo_hardware_diag.py` (v5)**. Kept for reference — the Python version adds live terminal display, background monitoring, anomaly detection, and the `.json` profile output. Use `turbo-diag` (the launcher) instead.
+## Sharing Results
+
+After the diagnostic completes, you'll see:
+
+```
+============================================
+  DIAGNOSTIC PACKAGE READY
+============================================
+
+  Zip file: /path/to/turbo-diag-20260326-143022.zip
+  Contents:
+    turbo-diag-20260326-143022.txt
+    turbo-hwprofile-20260326-143022.json
+    turbo-monitor-20260326-143022.csv
+
+  Send this zip file to the TurboQuant team.
+```
+
+**How to share:**
+1. **GitHub issue** (preferred): Open an issue at [turboquant_plus](https://github.com/TheTom/turboquant_plus/issues) with title "Diagnostic: [your hardware]" and attach the zip. GitHub supports attachments up to 25MB — the zip is typically under 100KB.
+2. **DM on X/Twitter**: Send the zip file directly to [@no_stp_on_snek](https://x.com/no_stp_on_snek)
+
+The zip is self-contained — everything we need is inside. No need to copy-paste logs or screenshot terminal output. The `.txt` log is human-readable if you want to look at it yourself first.
 
 ---
 
