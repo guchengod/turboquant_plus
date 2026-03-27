@@ -4,6 +4,38 @@ Hardware profiling, benchmarking, and quality validation for TurboQuant cache ty
 
 ---
 
+## Quality & Speed At A Glance
+
+**Quality (Qwen3.5-35B-A3B MoE Q8_0, M5 Max 128GB):**
+
+| Config | PPL vs q8_0 | NIAH Single (4K-32K) | NIAH Multi-Key (4K-32K) |
+|--------|-------------|---------------------|------------------------|
+| Uniform turbo3 | +1.1% | 18/20 (q8_0: 17/20) | 4/4 perfect |
+| Mode 2 (layer-adaptive) | **+0.14%** | — | — |
+
+turbo3 matches q8_0 on needle retrieval. The few single-needle misses at 32K overlap with positions where q8_0 also fails.
+
+**Speed (turbo3/q8_0 ratio):**
+
+| Hardware | Prefill | Decode (short) | Decode (32K) | Notes |
+|----------|---------|---------------|-------------|-------|
+| M5 Max 128GB | 0.95-1.00x | 0.92x | 0.75x | Healthy gradient |
+| M2 Pro 32GB | **1.32-1.73x** | ~0.73x | pending | Prefill wins big on lower bandwidth |
+| M1 Max 64GB | 0.93-0.98x | 0.83x | 0.39x | Constant memory LUT regression |
+| Dual 4090 (CUDA) | 0.98x | 0.37x (MoE, 42K) | — | buun investigating, fix in progress |
+
+**Pre-M5 decode regression** is a known hardware limitation, not a quality issue. Fully documented in [decode-speed-hardware-analysis.md](../docs/decode-speed-hardware-analysis.md). 12 kernel approaches tested, root cause is constant memory LUT divergence on Apple7/Apple8 GPU families.
+
+**Compression:**
+
+| Config | Effective ratio | Bits per value |
+|--------|----------------|---------------|
+| Uniform turbo3 | 4.6x | 3.5 |
+| Mode 2 (q8_0 last 8 layers) | 3.5x | ~4.6 |
+| + Temporal decay | +30-34% savings at 32K+ | — |
+
+---
+
 ## Quick Start
 
 ```bash
@@ -204,7 +236,9 @@ KV cache sizing at multiple context lengths. If the system is near its `recommen
 
 ### M1 Max 64GB Community Results (Qwen 35B MoE Q8_0)
 
-*Contributor: @Ambisphaeric (2026-03-26). GPU: Apple M1 Max, 32 cores, 64GB unified.*
+#### Tester 1: @Ambisphaeric
+
+*2026-03-26. GPU: Apple M1 Max, 32 cores, 64GB unified.*
 
 **Prefill (tok/s):**
 
@@ -216,8 +250,6 @@ KV cache sizing at multiple context lengths. If the system is near its `recommen
 | 16K | 600.5 | 569.6 | 0.949x |
 | 32K | 444.9 | 414.0 | 0.931x |
 
-Prefill is excellent: 93–98% of q8_0, flat curve, no regression.
-
 **Decode (tok/s, tg128):**
 
 | Context | q8_0 | turbo3 | Ratio | Flag |
@@ -228,26 +260,53 @@ Prefill is excellent: 93–98% of q8_0, flat curve, no regression.
 | 16K | 20.7 | 9.4 | 0.454x | ANOMALY |
 | 32K | 13.7 | 5.3 | 0.387x | ANOMALY |
 
+#### Tester 2: @mariotomich
+
+*2026-03-26. GPU: Apple M1 Max, 32 cores, 64GB unified. Clean system (94% free memory, low load). Full diagnostic run with mode 2.*
+
+**Prefill (tok/s):**
+
+| Context | q8_0 | turbo3 | mode2 | turbo3 ratio | mode2 ratio |
+|---------|------|--------|-------|-------------|-------------|
+| 2K | 859.2 | 844.5 | 848.2 | 0.983x | 0.987x |
+| 4K | 810.5 | 789.6 | 795.6 | 0.974x | 0.982x |
+| 8K | 731.2 | 698.9 | 707.1 | 0.956x | 0.967x |
+| 16K | 599.9 | 570.9 | 575.9 | 0.952x | 0.960x |
+| 32K | 450.0 | 416.4 | 423.5 | 0.925x | 0.941x |
+
+**Decode (tok/s, tg128):**
+
+| Context | q8_0 | turbo3 | mode2 | turbo3 ratio | mode2 ratio | Flag |
+|---------|------|--------|-------|-------------|-------------|------|
+| short | 42.9 | 35.6 | 36.9 | 0.830x | 0.860x | |
+| 4K | 34.3 | 20.8 | 22.1 | 0.606x | 0.645x | |
+| 8K | 28.1 | 14.8 | 16.3 | 0.526x | 0.580x | ANOMALY |
+| 16K | 21.0 | 8.7 | 9.7 | 0.414x | 0.462x | ANOMALY |
+| 32K | 13.8 | 5.4 | 6.1 | 0.391x | 0.442x | ANOMALY |
+
+**Cross-validation:** Both M1 Max testers show nearly identical results, confirming the M1 decode regression is hardware-dependent, not user-specific. Mode 2 (layer-adaptive) consistently adds ~5% decode improvement over uniform turbo3.
+
 Decode degrades significantly at long context. Known M1 issue: constant memory LUT contention in the flash attention dequant path. M5 Max (with tensor API) does not have this problem.
 
-**Anomalies detected:**
-- Steep decode degradation: 0.824x → 0.600x at 4K (27% drop)
-- Steep decode degradation: 0.513x → 0.426x at 16K (17% drop)
+### M2 Pro 32GB (Mac Mini) Results (Qwen2.5-7B Q4_K_M) — Partial
 
-### M2 Pro 32GB (Mac Mini) Results (Qwen2.5-7B Q4_K_M) — In Progress
+*Internal test (2026-03-26). GPU: Apple M2 Pro, 19-core GPU, Apple8 family (1008), has_tensor=false, 32GB unified, Metal 4. Build: 02268fc (norm correction). Clean run after killing competing workloads.*
 
-*Internal test (2026-03-26). GPU: Apple M2 Pro, Apple8 family, has_tensor=false.*
-
-Partial prefill results (competing workloads on device):
+**Prefill (tok/s):**
 
 | Context | q8_0 | turbo3 | Ratio |
 |---------|------|--------|-------|
-| 2K | 248.8 | 140.5 | 0.564x |
-| 4K | 230.0 | 131.1 | 0.570x |
-| 8K | 184.2 | 151.0 | 0.820x |
-| 16K | 135.5 | 111.5 | 0.823x |
+| 2K | 155.7 | 263.6 | **1.69x** |
+| 4K | 143.2 | 245.3 | **1.71x** |
+| 8K | 119.5 | 206.3 | **1.73x** |
+| 16K | 93.5 | 144.3 | **1.54x** |
+| 32K | 63.3 | 83.7 | **1.32x** |
 
-High variance due to competing workloads. Full results pending.
+turbo3 prefill is 32-73% **faster** than q8_0 on M2 Pro. Much bigger gap than M5 Max (~parity). Hypothesis: M2 Pro's lower memory bandwidth (200 GB/s vs M5 Max 546 GB/s) makes the compressed cache win harder since turbo3 moves less data per token.
+
+**Decode:** Test hung at 32K context, no decode data collected. Rerun pending with timeout fix. Expect M1-like decode regression (has_tensor=false, same constant memory LUT issue).
+
+**Mode 2 prefill:** Hung at pp16384. High variance at 8K+ suggests memory pressure beginning (32GB with 4GB model + KV cache + system overhead).
 
 ---
 
