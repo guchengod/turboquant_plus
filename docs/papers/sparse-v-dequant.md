@@ -136,6 +136,19 @@ Sparse V achieves **perfect** single-needle retrieval (9/9), improving from 7/9 
 
 Sparse V has minimal effect on prefill because prefill processes the entire prompt in parallel (no autoregressive attention weight computation). Measured prefill at 4K: 2429 tok/s with sparse V vs 2362 baseline (+2.8%).
 
+### 4.6 Real-World Server Benchmark
+
+The decode numbers in Section 4.2 are from `llama-bench` batch evaluation, which keeps the GPU maximally saturated. To validate under realistic conditions, we tested with `llama-server` processing a 70-page PDF (~24K prompt tokens) via the OpenAI-compatible chat completions API:
+
+| Metric | turbo3 + sparse V | q8\_0 | ratio |
+|--------|-------------------|-------|-------|
+| Prefill | 1417.8 tok/s | 1449.9 tok/s | 0.98× |
+| Decode | 53.3 tok/s | 68.2 tok/s | 0.78× |
+
+The server-mode decode ratio (0.78×) is notably worse than the batch benchmark at comparable context depth (0.92× at 16K, 0.93× at 32K). The gap is attributable to server overhead — HTTP request handling, chat template processing, sampling, and single-request scheduling — which reduces GPU utilization and makes the per-token dequant cost proportionally larger. Prefill remains near parity (0.98×) because the prompt is processed in one large batch regardless of server overhead.
+
+**Takeaway:** Users should expect ~78% of q8\_0 decode speed at long context in real server deployments, not the ~93% measured in synthetic benchmarks. The sparse V improvement still holds — without it, this number would be closer to 60%.
+
 ---
 
 ## 5. What Didn't Work: 14 Alternative Dequant Approaches
