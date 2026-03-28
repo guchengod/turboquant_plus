@@ -8,15 +8,30 @@
 #
 # Total: ~5 min per model. Enough to catch regressions or format issues.
 #
-# Usage: bash scripts/turbo-quick-bench.sh <model.gguf> [llama_dir]
+# Usage: bash scripts/turbo-quick-bench.sh [--no-ref] <model.gguf> [llama_dir]
+#
+# Options:
+#   --no-ref    Report numbers only, skip pass/fail judgment.
+#               Use this for models without known reference values.
 #
 # Example:
 #   bash scripts/turbo-quick-bench.sh ~/models/Qwen3.5-35B-A3B-Q8_0.gguf
-#   bash scripts/turbo-quick-bench.sh ~/models/Phi-3-mini-Q4_K_M.gguf ~/local_llms/llama.cpp
+#   bash scripts/turbo-quick-bench.sh --no-ref ~/models/Phi-3-mini-Q4_K_M.gguf
 
 set -eo pipefail
 
-MODEL="${1:?Usage: turbo-quick-bench.sh <model.gguf> [llama_dir]}"
+# Parse args
+NO_REF=0
+POSITIONAL=()
+for arg in "$@"; do
+    case $arg in
+        --no-ref) NO_REF=1 ;;
+        *) POSITIONAL+=("$arg") ;;
+    esac
+done
+set -- "${POSITIONAL[@]}"
+
+MODEL="${1:?Usage: turbo-quick-bench.sh [--no-ref] <model.gguf> [llama_dir]}"
 LLAMA_DIR="${2:-$HOME/local_llms/llama.cpp}"
 BUILD="${LLAMA_DIR}/build-turbo/bin"
 WIKI="${LLAMA_DIR}/wikitext-2-raw/wiki.test.raw"
@@ -57,6 +72,10 @@ check_ppl() {
         FAIL=$((FAIL + 1))
         return
     fi
+    if [ "$NO_REF" -eq 1 ]; then
+        echo "  $label: PPL $ppl"
+        return
+    fi
     local delta=$(python3 -c "print(f'{(($ppl - $ref) / $ref * 100):.2f}')")
     local abs_delta=$(python3 -c "print(abs(($ppl - $ref) / $ref * 100))")
     local status="✅"
@@ -78,6 +97,10 @@ check_speed() {
     if ! python3 -c "float('$speed')" 2>/dev/null; then
         echo "  $label: speed parse error ($speed) 🔴"
         FAIL=$((FAIL + 1))
+        return
+    fi
+    if [ "$NO_REF" -eq 1 ]; then
+        echo "  $label: ${speed} tok/s"
         return
     fi
     local status="✅"
@@ -177,12 +200,17 @@ echo ""
 # ==========================================
 echo "========================================"
 echo "  SUMMARY: $MODEL_NAME"
-echo "  PASS: $PASS  WARN: $WARN  FAIL: $FAIL"
-if [ "$FAIL" -gt 0 ]; then
-    echo "  STATUS: 🔴 ISSUES FOUND — investigate before using"
-elif [ "$WARN" -gt 0 ]; then
-    echo "  STATUS: ⚠️  WARNINGS — review results"
+if [ "$NO_REF" -eq 1 ]; then
+    echo "  MODE: report only (--no-ref)"
+    echo "  STATUS: review numbers manually"
 else
-    echo "  STATUS: ✅ ALL CLEAR"
+    echo "  PASS: $PASS  WARN: $WARN  FAIL: $FAIL"
+    if [ "$FAIL" -gt 0 ]; then
+        echo "  STATUS: 🔴 ISSUES FOUND — investigate before using"
+    elif [ "$WARN" -gt 0 ]; then
+        echo "  STATUS: ⚠️  WARNINGS — review results"
+    else
+        echo "  STATUS: ✅ ALL CLEAR"
+    fi
 fi
 echo "========================================"
