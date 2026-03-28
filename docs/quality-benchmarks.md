@@ -281,6 +281,14 @@ Model: Qwen3.5-35B-A3B-Q8_0 | Hardware: Apple M5 Max 128GB | Flash Attention ON
 | q4_0 | 4 | 4.0x | — | 6.142 | +0.51% |
 | **turbo3** | **3.5** | **4.6x** | **5.460 ± 0.141** | **6.193 ± 0.332** | **+0.8-1.3%** |
 
+### Long-Context Quality (wikitext-103, 32K context, 50 chunks)
+
+| Config | PPL | ± CI | vs q8_0 | Sparse V Δ |
+|--------|-----|------|---------|------------|
+| q8_0 baseline (no TurboQuant) | 7.0638 | 0.021 | — | — |
+| turbo3 WITHOUT sparse V | 7.1796 | 0.021 | +1.64% | — |
+| turbo3 WITH sparse V | 7.1796 | 0.021 | +1.64% | **0.0000** |
+
 ### Speed (wikitext-2, 512 context, 32 chunks prefill)
 
 | Cache Type | Prefill tok/s | vs q8_0 |

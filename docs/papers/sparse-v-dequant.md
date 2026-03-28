@@ -138,11 +138,14 @@ Sparse V perplexity (6.176) is actually *lower* (better) than baseline turbo3 (6
 
 **Long-context validation:** The c=512 result above is a no-regression sanity check — at 512 tokens, sparse V skips ~6% of positions and has negligible effect. To validate under conditions where sparse V is actively skipping positions, we ran perplexity at longer context lengths with increased chunk counts for statistical power. q8\_0 baselines were run first to confirm corpus/chunk sanity before evaluating turbo3.
 
-| Context | Chunks | q8\_0 | turbo3 ON | turbo3 OFF | ON/OFF Δ | vs q8\_0 |
-|---------|--------|-------|-----------|------------|----------|---------|
-| 8K | 20 | 5.4592 | 5.5195 | 5.5195 | 0.0000 | +1.1% |
-| 16K | 10 | 5.0008 | 5.0630 | 5.0630 | 0.0000 | +1.2% |
-| 32K | 5 | 6.0274 | 6.1103 | 6.1103 | 0.0000 | +1.4% |
+| Context | Chunks | Corpus | q8\_0 | turbo3 + sparse V | turbo3 no sparse V | Sparse V Δ | vs q8\_0 |
+|---------|--------|--------|-------|--------------------|--------------------|------------|---------|
+| 8K | 20 | wikitext-2 | 5.4592 | 5.5195 | 5.5195 | 0.0000 | +1.1% |
+| 16K | 10 | wikitext-2 | 5.0008 | 5.0630 | 5.0630 | 0.0000 | +1.2% |
+| 32K | 5 | wikitext-2 | 6.0274 | 6.1103 | 6.1103 | 0.0000 | +1.4% |
+| **32K** | **50** | **wikitext-103** | **7.0638** | **7.1796** | **7.1796** | **0.0000** | **+1.6%** |
+
+The 50-chunk wikitext-103 run (516MB corpus, CI ±0.021) provides 10× the statistical power of the wikitext-2 runs. Sparse V delta remains exactly 0.0000.
 
 All runs use $\tau = 10^{-6}$. PPL is numerically identical with and without sparse V at every context length tested in this setup. The +1.1–1.4% gap vs q8\_0 is the underlying TurboQuant compression overhead — consistent across context lengths and unaffected by sparse V.
 

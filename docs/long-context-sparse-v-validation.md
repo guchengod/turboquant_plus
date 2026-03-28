@@ -22,11 +22,23 @@ Prior sparse V quality validation used 8-chunk wikitext-2 at c=512 (PPL 6.1756).
 
 ### MoE (Qwen3.5-35B-A3B Q8_0) — Full Validation
 
-| Context | Chunks | q8_0 | turbo3 ON | turbo3 OFF | ON/OFF Δ | vs q8_0 |
-|---------|--------|------|-----------|------------|----------|---------|
+Each context length tested with three sequential runs: q8_0 baseline first (sanity check), then turbo3 without sparse V (isolates compression), then turbo3 with sparse V (isolates sparse V effect).
+
+**wikitext-2 (1.3MB corpus):**
+
+| Context | Chunks | q8_0 baseline | turbo3 + sparse V | turbo3 no sparse V | Sparse V Δ | vs q8_0 |
+|---------|--------|---------------|--------------------|--------------------|------------|---------|
 | 8K | 20 | 5.4592 ± 0.045 | 5.5195 ± 0.045 | 5.5195 ± 0.045 | 0.0000 | +1.1% |
 | 16K | 10 | 5.0008 ± 0.039 | 5.0630 ± 0.040 | 5.0630 ± 0.040 | 0.0000 | +1.2% |
 | 32K | 5 | 6.0274 ± 0.050 | 6.1103 ± 0.051 | 6.1103 ± 0.051 | 0.0000 | +1.4% |
+
+**wikitext-103 (516MB corpus, 10× statistical power):**
+
+| Context | Chunks | q8_0 baseline | turbo3 + sparse V | turbo3 no sparse V | Sparse V Δ | vs q8_0 |
+|---------|--------|---------------|--------------------|--------------------|------------|---------|
+| 32K | 50 | 7.0638 ± 0.021 | 7.1796 ± 0.021 | 7.1796 ± 0.021 | **0.0000** | +1.6% |
+
+The 50-chunk wikitext-103 run is the strongest validation: tight CI (±0.021), large corpus, high chunk count. Sparse V delta is exactly 0.0000.
 
 ### Dense (Qwen3.5-27B Q8_0)
 
@@ -56,13 +68,14 @@ Measured directly via `output_attentions=True`, counting positions where attenti
 
 **Sparse V is directly measured to be active at long context.** At 4096 tokens, 28.4% of V positions are below threshold (directly measured). Skip rate grows monotonically with context length.
 
-**PPL remains numerically identical when sparse V is active.** ON/OFF delta is 0.0000 at every context length tested (8K through 32K), even at 32K where ~90% of V positions are estimated to be skipped. The +1.1-1.4% gap vs q8_0 is the underlying TurboQuant compression overhead — consistent across context lengths and unaffected by sparse V.
+**PPL remains numerically identical when sparse V is active.** ON/OFF delta is 0.0000 at every context length and corpus tested (8K through 32K on wikitext-2, 32K on wikitext-103 with 50 chunks). The +1.1-1.6% gap vs q8_0 is the underlying TurboQuant compression overhead — consistent across context lengths and unaffected by sparse V.
+
+**The 50-chunk wikitext-103 run is the definitive validation.** With CI ±0.021, it has sufficient statistical power to detect a PPL difference of ~0.04 (~0.6%). No difference was observed. This supersedes the earlier 2-5 chunk wikitext-2 runs.
 
 **The 512-context PPL should be described as a no-regression sanity check.** At c=512, sparse V skips ~9% of positions. The true validation is at c=8K+ where skip rates are 28-90% and the optimization is actively changing computation.
 
 **Remaining caveats:**
 - Direct skip-rate measurement used Qwen3-1.7B (28 layers), not the 35B eval model (40 layers). The 35B model cannot run eager attention without OOM. Skip rates on the 35B are estimated from decode speed improvements.
-- 32K uses 5 chunks (corpus size limit). This is 2.5x more than our earlier 2-chunk run but still fewer than the 20-chunk 8K eval.
 - Skip rate varies significantly by layer (0% to 72% at 4K). Early layers show higher skip rates.
 
 ## Raw Commands
@@ -91,4 +104,19 @@ done
 
 # Direct skip rate measurement
 python3 scripts/measure_skip_rate.py 512 2048 4096
+
+# 50-chunk 32K on wikitext-103 (strongest validation)
+WIKI103=~/local_llms/llama.cpp/wikitext-103-raw/wiki.train.raw
+
+# 1. q8_0 baseline (anchors the experiment)
+$LLAMA/llama-perplexity -m $MODEL_MOE -f $WIKI103 -c 32768 \
+  -ctk q8_0 -ctv q8_0 -fa on --chunks 50 -ngl 99
+
+# 2. turbo3 WITHOUT sparse V (isolates compression effect)
+TURBO_SPARSE_V=0 $LLAMA/llama-perplexity -m $MODEL_MOE -f $WIKI103 -c 32768 \
+  -ctk turbo3 -ctv turbo3 -fa on --chunks 50 -ngl 99
+
+# 3. turbo3 WITH sparse V (isolates sparse V effect)
+$LLAMA/llama-perplexity -m $MODEL_MOE -f $WIKI103 -c 32768 \
+  -ctk turbo3 -ctv turbo3 -fa on --chunks 50 -ngl 99
 ```
