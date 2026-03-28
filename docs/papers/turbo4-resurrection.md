@@ -263,7 +263,7 @@ turbo4 prefill matches or exceeds q8\_0 at all context lengths. Compressed cache
 - Decode: 79.87 tok/s, 93% of q8_0 (faster than turbo3's 76.84)
 - Prefill: 101-105% of q8_0 across all context lengths
 - NIAH: 31/33 (93.9%) — beats q8_0 (30/33, 90.9%)
-- KLD: 0.0096 (40% lower than turbo3, matches q4_0 same-top-p)
+- KLD: 0.0096 (40% lower than turbo3's 0.0161; note q4_0 is slightly lower at 0.0081 despite worse PPL — more centroids help top-token prediction more than overall distribution matching)
 - Dense model: matches q8_0 decode (17.25 vs 17.17 tok/s)
 - Real-world PDF (24K): 63.7 tok/s decode (20% faster than turbo3's 53.3)
 - Sparse V: active and compatible
