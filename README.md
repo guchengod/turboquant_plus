@@ -16,6 +16,8 @@ Compresses transformer KV cache **3.8–6.4x** using PolarQuant + Walsh-Hadamard
 
 Validated end-to-end from 1.5B to **104B** on M5 Max via llama.cpp Metal. **104B at 128K context on a MacBook** with turbo3 (PPL 4.024, 74 GB peak memory).
 
+**New here?** See the [Getting Started Guide](docs/getting-started.md) for build instructions, config selection, and how to benchmark.
+
 ## Status: v1 Complete, Speed Optimized, Community-Tested
 
 - 511+ Python tests, 100% code coverage on diagnostics
@@ -143,7 +145,7 @@ turbo4 beats q8_0 on retrieval (31/33 vs 30/33). Shared failure at 8K/100% is a 
 
 turbo3 prefill is faster than q8_0 at 32K on both models (70B: 80.8 vs 75.2 t/s, 104B: 64.5 vs 62.3 t/s). Smaller KV cache = less memory bandwidth during attention.
 
-104B at 128K requires Metal settings: `sudo sysctl iogpu.wired_limit_mb=122880` + `GGML_METAL_NO_RESIDENCY=1`. Without these, Metal stalls at ~49K context on 70B+ models.
+104B at 128K requires raising macOS GPU memory cap: `sudo sysctl iogpu.wired_limit_mb=117964` (90% of 128GB). Without this, Metal stalls at ~49K context on 70B+ models. See [Getting Started Guide](docs/getting-started.md) for per-RAM values.
 
 See [M5 Max stress test](docs/papers/m5-max-stress-test.md) for the full data.
 
