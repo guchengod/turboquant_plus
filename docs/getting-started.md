@@ -121,9 +121,13 @@ Help the project by sharing your numbers. Here's how to generate comparable resu
 ### Step 1: Download test data
 
 ```bash
-# Wikitext-2 for perplexity testing
-wget https://huggingface.co/datasets/Salesforce/wikitext/resolve/main/wikitext-2-raw-v1/test-00000-of-00001.parquet
-# Or use the raw text version from the dataset page
+# Wikitext-2 raw text for perplexity testing
+# Option 1: Direct download (no HF account needed)
+wget https://huggingface.co/nisten/llama3-8b-instruct-32k-gguf/raw/main/wiki.test.raw
+
+# Option 2: Via Hugging Face CLI (requires HF token for some models)
+# pip install huggingface-hub
+# huggingface-cli download Salesforce/wikitext wikitext-2-raw-v1/test-00000-of-00001.parquet
 ```
 
 ### Step 2: Run baseline (always do this first)
