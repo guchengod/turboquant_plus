@@ -208,6 +208,131 @@ Post your numbers in the [GitHub discussion thread](https://github.com/ggml-org/
 
 Include: model name, weight quantization, GPU, VRAM, turbo config, PPL, and speed numbers.
 
+## Weight Compression (TQ4_1S) — Experimental, Metal Only
+
+> **Backend support:** Weight compression (TQ4_1S) is currently **Metal (Apple Silicon) only**. The quantization step (llama-quantize) works on any platform, but the runtime dequant kernels (V2.1 fused SIMD) are Metal-specific. Compressed GGUF files will not run correctly on CUDA or HIP until those backends are ported. If you are a CUDA developer interested in contributing the port, please open an issue or DM [@no_stp_on_snek](https://x.com/no_stp_on_snek).
+
+TQ4_1S applies WHT rotation + Lloyd-Max polar quantization to model weights (not just KV cache). This is post-training quantization -- no retraining or calibration required. Apply directly to Q8_0 GGUF models.
+
+See the [weight compression paper](papers/weight-compression-tq4.md) for full methodology and results.
+
+### How to Quantize
+
+Create a tensor type file for your model, then quantize:
+
+```bash
+# Step 1: Generate Config I tensor type file for your model
+# Adjust n_layers for your model (28 for 1.5B, 64 for 27B, 80 for 70B, etc.)
+python3 -c "
+n_layers = 64  # <-- set this for your model
+boundary = 2
+for i in range(boundary, n_layers - boundary):
+    for t in ['attn_q', 'attn_k', 'attn_v', 'attn_output', 'ffn_gate', 'ffn_up']:
+        print(f'blk.{i}.{t}.weight=tq4_1s')
+    print(f'blk.{i}.ffn_down.weight=q4_k')
+" > config_i.txt
+
+# Step 2: Quantize from Q8_0 source
+./build/bin/llama-quantize \
+  --allow-requantize \
+  --tensor-type-file config_i.txt \
+  model-Q8_0.gguf model-config-i.gguf Q8_0
+```
+
+For **Llama-family models**, use Hybrid (Q4_K for ALL FFN) or Premium (Q5_K/Q6_K FFN):
+
+```bash
+# Llama Hybrid: TQ4_1S attention, Q4_K all FFN
+python3 -c "
+n_layers = 80  # Llama 3.1 70B
+for i in range(2, n_layers - 2):
+    for t in ['attn_q', 'attn_k', 'attn_v', 'attn_output']:
+        print(f'blk.{i}.{t}.weight=tq4_1s')
+    for t in ['ffn_gate', 'ffn_up', 'ffn_down']:
+        print(f'blk.{i}.{t}.weight=q4_k')
+" > llama_hybrid.txt
+
+# Llama Premium: TQ4_1S attention, Q5_K/Q6_K FFN (better quality, +8G)
+python3 -c "
+n_layers = 80
+for i in range(4, n_layers - 4):
+    for t in ['attn_q', 'attn_k', 'attn_v', 'attn_output']:
+        print(f'blk.{i}.{t}.weight=tq4_1s')
+    for t in ['ffn_gate', 'ffn_up']:
+        print(f'blk.{i}.{t}.weight=q5_k')
+    print(f'blk.{i}.ffn_down.weight=q6_k')
+" > llama_premium.txt
+
+./build/bin/llama-quantize \
+  --allow-requantize \
+  --tensor-type-file llama_hybrid.txt \
+  model-Q8_0.gguf model-hybrid.gguf Q8_0
+```
+
+Source requirement: Q8_0 GGUF. Models already at Q4_K_M have minimal compression headroom.
+
+### Model Compatibility Matrix
+
+Based on architecture analysis and tested results. Models marked with * are predictions based on code analysis of `convert_hf_to_gguf.py` and need community validation.
+
+### Tested Models — Validated Results
+
+| Model | Size (Q8_0) | Size (Compressed) | Config | PPL Delta | Decode | NIAH |
+|-------|-------------|-------------------|--------|-----------|--------|------|
+| Qwen2.5-1.5B | 1.76G | **1.28G** | Config I | +1.9% | 96% | 6/6 |
+| Qwen3.5-27B | 26.6G | **19.1G** | Config I | +1.3% | 99% | 3/3 |
+| Qwen3.5-35B-A3B MoE | 34.4G | **21.6G** | Config I | +1.4% | 102% | — |
+| **Qwen2.5-72B** | **72.0G** | **45.8G** | **Config I** | **+3.9%** | **95%** | **3/3** |
+| Phi-4 14B | 14.5G | **9.3G** | Config I | +1.0% | **254%** | 3/3 |
+| Llama 3.1 70B | 69.8G | **49.8G** | Premium | +5.8% | fast | 3/3 |
+| Llama 3.1 70B | 69.8G | **40.2G** | Hybrid | +16% | 133% | 3/3 |
+
+### Predicted Models — Based on Architecture Analysis
+
+Models marked with * need community validation. Predictions based on `convert_hf_to_gguf.py` analysis.
+
+| Model Family | Config | Expected PPL Delta | Size Reduction | Notes |
+|---|---|---|---|---|
+| Phi-3* | Config I | ~+1% | ~36% | Same family as tested Phi-4 |
+| Llama 2/3/3.2* | Hybrid/Premium | ~+6-20% | ~29-42% | Same family as tested Llama 3.1 |
+| CodeLlama* | Hybrid/Premium | ~+6-20% | ~29-42% | Extends LlamaModel |
+| Mistral* | Hybrid/Premium | ~+6-20% | ~29-42% | Extends LlamaModel, has permutation |
+| Mixtral* | Hybrid/Premium | ~+6-20% | ~29-42% | MoE, extends LlamaModel |
+| Granite (IBM)* | Hybrid/Premium | ~+6-20% | ~29-42% | Extends LlamaModel |
+| Llama 4* | Config I | ~+1-4% | ~30-38% | `undo_permute=False`, no permutation |
+| Gemma 2/3* | Config I | ~+1-4% | ~30-38% | No permutation |
+| Command-R/R+* | Config I | ~+1-4% | ~30-38% | No permutation |
+| DeepSeek V2/R1* | Config I | unknown | ~30% | MLA attention, less certain |
+| Falcon* | Config I | ~+1-4% | ~30-38% | No permutation |
+| InternLM* | Config I | ~+1-4% | ~30-38% | No permutation |
+| OLMo* | Config I | ~+1-4% | ~30-38% | No permutation |
+| Yi* | Config I | ~+1-4% | ~30-38% | No permutation |
+
+**Config I:** attn+gate/up=TQ4_1S, ffn_down=Q4_K, boundary 2+2. For Qwen, Phi, and non-Llama models.
+**Hybrid:** attn=TQ4_1S, ALL FFN=Q4_K, boundary 2+2. For Llama-family. Max compression, +16% PPL.
+**Premium:** attn=TQ4_1S, ffn_gate/up=Q5_K, ffn_down=Q6_K, boundary 4+4. For Llama-family. Best quality, +5.8% PPL.
+
+The key discriminator is whether the model's GGUF conversion permutes Q/K weights for RoPE (`undo_permute` in `convert_hf_to_gguf.py`). Models without permutation tend to work well with Config I. However, permutation alone does not fully explain the sensitivity difference (see paper Section 5.7). Treat predictions as directional. **Community validation on untested models is very welcome** -- post results in the [discussion thread](https://github.com/ggml-org/llama.cpp/discussions/20969).
+
+### Benchmark a Compressed Model
+
+```bash
+# PPL baseline (Q8_0)
+./build/bin/llama-perplexity -m model-Q8_0.gguf -ngl 99 -fa 1 \
+  -f wiki.test.raw -c 512 --chunks 20
+
+# PPL compressed
+./build/bin/llama-perplexity -m model-config-i.gguf -ngl 99 -fa 1 \
+  -f wiki.test.raw -c 512 --chunks 20
+
+# Speed
+./build/bin/llama-bench -m model-config-i.gguf -fa 1
+
+# Combined with TurboQuant KV compression
+./build/bin/llama-server -m model-config-i.gguf -ngl 99 -fa 1 \
+  -ctk q8_0 -ctv turbo3
+```
+
 ## Apple Silicon: Large Models at Long Context
 
 If you're running 70B+ models at long context on Apple Silicon, macOS caps GPU memory at ~75% of RAM by default. This causes Metal to hang at ~49K context. Fix:
