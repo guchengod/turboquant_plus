@@ -11,7 +11,7 @@ GitHub: [@TheTom](https://github.com/TheTom)
 
 ## Acknowledgment
 
-This work was inspired by David Y. Tan's original TQ3_1S weight-compression direction and his llama.cpp-based experiments applying TurboQuant-style transform quantization ideas to model weights ([turbo-tan/llama.cpp-tq3](https://github.com/turbo-tan/llama.cpp-tq3/tree/main)). Tan built the format (WHT rotation + dual half-block scales + 8 Lloyd-Max centroids) and proved the concept with CUDA kernels on Qwen3.5-27B, achieving PPL 7.257 (+0.19% vs Q4_0) at 10% smaller size.
+This work was inspired by David Y. Tan's original TQ3_1S weight-compression direction and his llama.cpp-based experiments applying TurboQuant-style transform quantization ideas to model weights ([turbo-tan/llama.cpp-tq3](https://github.com/turbo-tan/llama.cpp-tq3/tree/main)). Tan built the original TQ3_1S format (WHT rotation + dual half-block scales + 8 Lloyd-Max centroids) and later extended the public runtime line with TQ3_4S, a stronger follow-on format in the same family. The early Qwen3.5-27B TQ3_1S result (PPL 7.257, near Q4_0 at smaller size) demonstrated proof of concept; subsequent work, including TQ3_4S, showed that the direction was broader than the initial prototype.
 
 The results here build on that starting point with follow-on work including: Metal runtime with cooperative SIMD pre-rotation (5.7x prefill speedup), the tensor-role policy discovery through systematic A/B isolation, the 4-bit TQ4_1S extension (inspired by our turbo4 KV resurrection findings), hybrid quantization configs mixing WHT-rotated and native llama.cpp types, model-family-specific policies for Llama vs Qwen/Phi, and validation across 6 models, 3 model families, from 1.5B to 72B parameters.
 
