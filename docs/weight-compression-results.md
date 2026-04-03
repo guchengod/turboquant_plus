@@ -57,6 +57,7 @@ This table shows the largest compressed model each GPU has successfully run. It'
 | **M4 Max** | 64GB | 27B | ✅ | 85–99% | Community (Metal) |
 | **M2 Pro** | 32GB | 7B | ✅ | ~85% | Internal (Metal) |
 | **M1 Max** | 64GB | 27B | ✅ | 63% | Community (Metal) |
+| **AMD RX 9070 XT** | 16GB | 1.5B | ✅ | **130%** (Config I faster than Q8_0) | Internal (HIP, Windows) |
 | **AMD RX 6600** | 8GB | 1.1B (CPU fallback) | ⚠️ | GPU matmul broken (not our bug) | Community (HIP) |
 
 **Note:** CUDA decode speed varies by kernel version. Load-time TQ4_1S→q8_0 conversion (Community contributor) gives 100% native q8_0 speed at compressed file size.
@@ -250,7 +251,7 @@ Zero regressions on uncompressed models across all tested hardware.
 | Runs on Metal | **High** | 4 Apple Silicon chips, 6+ models, zero failures |
 | Runs on CUDA Ada | **High** | 4090, L40S, 5090, Windows + WSL2 + Linux |
 | Runs on CUDA Ampere | **Medium** | 3090 tested, 3070 KV-only |
-| Runs on AMD HIP | **Low** | Build works, GPU matmul broken on gfx1032 |
+| Runs on AMD HIP | **Medium** | RX 9070 XT (RDNA 4) works, 30% faster than Q8_0. RX 6600 (gfx1032) GPU matmul broken upstream |
 | Compression ratio (28–42%) | **High** | Consistent across all models and hardware |
 | Quality (Qwen/Phi) | **High** | +0.4–3.9% PPL across 6 models, 5+ testers |
 | Quality (Mistral) | **Medium** | 1 model tested, +0.41–1.28% |
