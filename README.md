@@ -546,7 +546,7 @@ Detailed debugging logs, gotchas, and benchmarks from the llama.cpp port:
 
 TurboQuant KV cache compression is being ported to Apple's [MLX framework](https://github.com/ml-explore/mlx) for native Python/Swift inference on Apple Silicon.
 
-**Fork:** [TheTom/mlx](https://github.com/TheTom/mlx) — branch `feature/turboquant-kv-clean`
+**Fork:** [TheTom/mlx](https://github.com/TheTom/mlx) — branch `feature/turboquant-plus`
 
 ### Preliminary Results (Qwen3.5-2B 8bit, M5 Max)
 
