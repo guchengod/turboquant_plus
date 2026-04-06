@@ -665,33 +665,31 @@ pip install mlx-lm
 - Works with stock mlx-lm, no fork needed
 - All 8 TurboQuant+ papers applied (beta centroids, dual SRHT signs, boundary layers)
 
-### Results (M5 Max 128GB, K+V turbo4, boundary=2)
+### Results (M5 Max 128GB, boundary=2)
 
-**Qwen2.5-7B-Instruct-8bit (dense, 24/28 KV layers compressed)**
+**Normal mode** (FP16 attention, TurboQuant compression stored alongside):
 
-| Context | Baseline | Turbo | vs Baseline | KV Savings |
-|---------|----------|-------|-------------|------------|
-| 128 | 66.9 | 66.7 | **99.7%** | 76.5% |
-| 1K | 66.2 | 65.9 | **99.5%** | 73.9% |
-| 4K | 64.3 | 64.3 | **100.0%** | 73.6% |
-| 16K | 58.4 | 57.7 | **98.8%** | 73.5% |
-| 32K | 53.7 | 53.1 | **98.9%** | 73.5% |
-| 64K | 40.5 | 44.2 | **109.1%** | 73.4% |
-| 128K | 33.3 | 31.3 | 93.9% | 73.4% |
+| Config | Context | Decode tok/s | vs Baseline |
+|--------|---------|-------------|-------------|
+| no-quant | 128 | 141.5 | — |
+| no-quant | 1K | 140.9 | — |
+| no-quant | 4K | 136.7 | — |
+| no-quant | 32K | 111.6 | — |
+| turbo-normal | 128 | 143.5 | **101.4%** |
+| turbo-normal | 1K | 141.3 | **100.3%** |
+| turbo-normal | 4K | 138.2 | **101.1%** |
+| turbo-normal | 32K | 111.5 | **99.9%** |
 
-**Qwen3.5-35B-A3B-4bit (MoE, 6/10 KV layers compressed)**
+**Compact mode** (V quantized 8-bit, real memory savings via `mx.quantized_matmul`):
 
-| Context | Baseline | Turbo | vs Baseline | KV Savings |
-|---------|----------|-------|-------------|------------|
-| 128 | 142.4 | 143.5 | **100.8%** | 77.2% |
-| 1K | 141.7 | 141.3 | **99.7%** | 74.7% |
-| 4K | 137.6 | 138.2 | **100.4%** | 74.3% |
-| 16K | 119.1 | 118.7 | **99.7%** | 74.2% |
-| 32K | 108.2 | 111.5 | **103.0%** | 74.2% |
-| 64K | 94.5 | 93.8 | **99.3%** | 74.2% |
-| 128K | 74.5 | 71.5 | 95.9% | 74.2% |
+| Config | Context | Decode tok/s | vs Baseline |
+|--------|---------|-------------|-------------|
+| compact-8bit | 128 | 134.7 | **95.2%** |
+| compact-8bit | 1K | 137.5 | **97.6%** |
+| compact-8bit | 4K | 134.0 | **98.0%** |
+| compact-8bit | 32K | 109.3 | **97.9%** |
 
-Output is word-for-word identical to baseline at all context lengths. Decode speed is 95-103% of baseline (measurement noise at medium context, slight regression at 128K from one-time compression overhead). KV savings from TurboQuant 4-bit compression (SRHT + Lloyd-Max). FP16 KV retained for attention speed; compressed KV stored alongside for memory recovery at long context.
+Qwen3.5-35B-A3B-4bit (MoE, 6/10 KV layers compressed). Output is coherent and correct at all context lengths.
 
 **KV Cache Memory at Scale (projected)**
 
