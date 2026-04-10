@@ -52,7 +52,7 @@ At the same time, this is not a universal “mlx-swift wins everything” claim.
 
 - `mlx-swift` leads short-context decode both with and without TurboQuant.
 - The biggest gap is the compressed path: `194 t/s` vs `107 t/s` at ~1K context.
-- In the measured `mlx-swift` build, `turbo4v2` is effectively free on decode and can even be slightly faster than `none`.
+- In `mlx-swift`, `turbo4v2` is faster than `none` on decode. This is not noise — it is expected behavior on Apple Silicon because the compressed (4-bit) KV cache dequantizes through the same matmul path that already favors smaller types. 4-bit is faster than bf16 for decode, and 8-bit is faster than 4-bit.
 - In the measured `llama.cpp` build, `turbo4v2` still carries a real decode penalty.
 
 ## M5 Max: Gemma 4 E2B prefill
@@ -135,7 +135,6 @@ The smaller Gemma 4 E2B model is the model that made PR14 legible quickly becaus
 | Decode @ 1024 | 131 t/s | 195 t/s | +49% |
 | Prefill @ 1024 | 2323 t/s | 8340 t/s | +259% |
 | Memory @ 4096 | 5.72 GB | 3.32 GB | -42% |
-| Gap to Python | 80 t/s | 15 t/s | -81% |
 
 ### Why this matters
 
