@@ -1,6 +1,6 @@
 # TurboQuant+
 
-> ### [Getting Started Guide](docs/getting-started.md) | [Configuration Recommendations](docs/turboquant-recommendations.md) | [llama.cpp Fork](https://github.com/TheTom/llama-cpp-turboquant) | [Swift MLX Fork](https://github.com/ekryski/mlx-swift-lm)
+> ### [Getting Started Guide](docs/getting-started.md) | [Configuration Recommendations](docs/turboquant-recommendations.md) | [llama.cpp Fork](https://github.com/TheTom/llama-cpp-turboquant) | [Swift MLX Fork](https://github.com/ekryski/mlx-swift-lm) | [Commercial Support](https://x.com/no_stp_on_snek)
 
 > **🍎 On Apple Silicon and want the fastest path?** Use [ekryski/mlx-swift-lm](https://github.com/ekryski/mlx-swift-lm) — Eric Kryski's Swift MLX implementation that I've been actively collaborating on. Native Swift, ~2.5x faster decode than Python mlx-lm, full TurboQuant+ support including turbo4v2 (4-bit K + 2-bit V). 144 tok/s on Qwen3.5-35B-A3B MoE at 4K on M5 Max. This llama.cpp repo is for cross-platform deployment (CUDA, ROCm, CPU, Metal).
 
@@ -750,6 +750,8 @@ Issues and PRs welcome. The main areas where help is needed:
 If you find this work useful, you can support it via [GitHub Sponsors](https://github.com/sponsors/TheTom) or BTC:
 
 BTC: bc1qsfaaf6mkz2yxx2vavg2n0zgsf3qj25uh94t83rwuq7de67dey05sc3tgjx
+
+**Commercial support:** For inference optimization and KV cache tuning engagements, DM [@no_stp_on_snek](https://x.com/no_stp_on_snek) on X.
 
 ## License
 
