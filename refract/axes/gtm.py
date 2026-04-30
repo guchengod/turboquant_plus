@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
-from ..runner import KVConfig, run_completion
+from ..runner import KVConfig, run_completion, tokenize_to_ids
 
 
 @dataclass
@@ -58,13 +58,13 @@ def _load_prompts(path: Path) -> list[dict]:
 def _tokenize_words(text: str) -> list[str]:
     """v0.1 token proxy: whitespace split.
 
-    TODO(v0.2): pipe through `llama-tokenize -m MODEL` to compare on real
-    BPE/SentencePiece tokens.
+    DEPRECATED in v0.1.2 — see tokenize_to_ids() in runner.py for true
+    model-token tokenization. Kept for unit tests and as a fallback.
     """
     return text.split()
 
 
-def _diff(ref: list[str], cand: list[str]) -> tuple[Optional[int], int]:
+def _diff(ref: list, cand: list) -> tuple[Optional[int], int]:
     """Return (first_divergence_position, prefix_agreement_length).
 
     first_divergence_position is None iff sequences are identical (treating
@@ -119,8 +119,22 @@ def run_gtm(
             n_predict=n_predict, ctx=ctx, n_gpu_layers=n_gpu_layers, seed=seed,
         )
 
-        ref_toks = _tokenize_words(ref_text)
-        cand_toks = _tokenize_words(cand_text)
+        # v0.1.2: tokenize via the model's own vocab (llama-tokenize) instead
+        # of whitespace. Whitespace tokenization can over-count (a 48-token
+        # generation can produce 60+ whitespace tokens when generations
+        # contain short words separated by spaces), and the resulting
+        # mean_prefix / n_predict ratio exceeded 1.0 on some models in v0.1.1.
+        # Model-token diff is the right unit since n_predict is also in
+        # model tokens.
+        try:
+            ref_toks = tokenize_to_ids(model, ref_text)
+            cand_toks = tokenize_to_ids(model, cand_text)
+        except Exception as e:
+            # Fallback to whitespace if tokenizer call fails — preserves the
+            # axis output even if the underlying tool errors out, but the
+            # ratio may be off (logged as a per-prompt note).
+            ref_toks = _tokenize_words(ref_text)
+            cand_toks = _tokenize_words(cand_text)
         first_div, prefix_len = _diff(ref_toks, cand_toks)
         is_match = first_div is None
 

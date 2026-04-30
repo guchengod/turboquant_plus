@@ -237,6 +237,7 @@ def run_completion(
         env=env,
         timeout=timeout,
         text=True,
+        errors="replace",  # llama-cli/perplexity sometimes emits non-utf-8
     )
 
     completion = _strip_noise(proc.stdout).strip()
@@ -299,6 +300,7 @@ def run_perplexity_kld_base(
         cmd, stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=env, timeout=timeout, text=True,
+        errors="replace",  # llama-perplexity stderr can contain non-utf-8 bytes
     )
     if proc.returncode != 0:
         raise RuntimeError(
@@ -346,6 +348,7 @@ def run_perplexity_kld(
         cmd, stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=env, timeout=timeout, text=True,
+        errors="replace",  # llama-perplexity stderr can contain non-utf-8 bytes
     )
     if proc.returncode != 0:
         raise RuntimeError(
@@ -372,3 +375,59 @@ def run_perplexity_kld(
 def _first_float(pattern: re.Pattern, text: str) -> Optional[float]:
     m = pattern.search(text)
     return float(m.group(1)) if m else None
+
+
+# ---------------------------------------------------------------------------
+# llama-tokenize wrapper (used by GTM v0.1.2+)
+# ---------------------------------------------------------------------------
+
+
+def tokenize_to_ids(
+    model: Path,
+    text: str,
+    timeout: float = 120.0,
+) -> list[int]:
+    """Tokenize ``text`` using the model's vocabulary via llama-tokenize.
+
+    Returns a list of integer token IDs. Used by GTM v0.1.2+ to compare
+    completions in true model-token units rather than whitespace tokens
+    (which can over-count and produce unit-mismatch artifacts where the
+    "matched prefix length" exceeds the actual --n-predict value).
+
+    Empty string returns []. Non-utf-8 bytes in stderr are tolerated
+    (errors='replace').
+    """
+    if not text:
+        return []
+    bin_path = _bin("llama-tokenize")
+    cmd: list[str] = [
+        str(bin_path),
+        "-m", str(model),
+        "--ids",
+        "--no-bos",
+        "--no-parse-special",
+        "--log-disable",
+        "--stdin",
+    ]
+    proc = subprocess.run(
+        cmd,
+        input=text,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+        text=True,
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"llama-tokenize exited {proc.returncode}\n"
+            f"stderr tail:\n{proc.stderr[-500:]}"
+        )
+    # Output looks like: "[1, 2, 3, 4, 5]\n"
+    out = proc.stdout.strip()
+    if not out or not out.startswith("["):
+        return []
+    inner = out.strip("[]\n ")
+    if not inner:
+        return []
+    return [int(x.strip()) for x in inner.split(",") if x.strip()]
