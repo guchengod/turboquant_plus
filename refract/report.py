@@ -363,10 +363,37 @@ def json_report(
     except Exception:
         pass
 
+    # v0.3.2: capture sanitized repro command so the HTML report shows the
+    # actual `refract score ...` invocation that produced the result rather
+    # than whatever script re-rendered the JSON. Strip /Users/<name>/ to ~/
+    # to avoid leaking personal paths in shared reports. Gated on "argv
+    # looks like a refract CLI run" so regen/test scripts don't pollute
+    # the field.
+    try:
+        import sys as _sys, shlex as _shlex, os as _os
+        argv = _sys.argv
+        looks_like_refract = any(
+            "refract.cli" in a or a.endswith("/refract") or a == "refract"
+            for a in argv
+        )
+        if looks_like_refract:
+            home = _os.path.expanduser("~")
+            parts = []
+            for a in argv:
+                if home and a.startswith(home + "/"):
+                    a = "~" + a[len(home):]
+                parts.append(_shlex.quote(a))
+            repro_cmd = " ".join(parts)
+        else:
+            repro_cmd = ""
+    except Exception:
+        repro_cmd = ""
+
     return {
         "schema": "refract.report.v0.3.1",
         "framework_version": _fv,
         "environment": env_meta,
+        "repro_command": repro_cmd,
         "timestamp": _dt.datetime.now().isoformat(timespec="seconds"),
         # v0.2.0: be explicit about score direction so machine consumers
         # (and humans converting from PPL where lower is better) don't

@@ -28,6 +28,7 @@ import datetime as _dt
 import html as _html
 import json as _json
 import math
+import os
 import platform
 import shlex
 import subprocess
@@ -70,11 +71,11 @@ _AXIS_PROSE = {
 
 
 _AXIS_LABEL = {
-    "gtm":        "Axis A — GTM",
-    "trajectory": "Axis A — Trajectory",
-    "kld":        "Axis B — KLD@D",
-    "rniah":      "Axis C — R-NIAH",
-    "plad":       "Axis D — PLAD",
+    "gtm":        "Axis A — GTM (Greedy Trajectory Match)",
+    "trajectory": "Axis A — Trajectory (Greedy Trajectory Match, decode-time)",
+    "kld":        "Axis B — KLD@D (KL Divergence at the Decoder)",
+    "rniah":      "Axis C — R-NIAH (Retrieval Needle-In-A-Haystack)",
+    "plad":       "Axis D — PLAD (Perturbation-Locality Aware Drift)",
 }
 
 
@@ -184,10 +185,58 @@ def _model_metadata(model_path: Path) -> dict:
     return info
 
 
-def _repro_command() -> str:
-    """Return the exact argv that produced this report, shell-escaped."""
-    parts = [shlex.quote(a) for a in sys.argv]
-    return " ".join(parts)
+def _repro_command(raw_json: dict | None, model: str,
+                   reference_label: str, candidate_label: str,
+                   has_rniah: bool, has_plad: bool) -> str:
+    """Return the shell-escaped command that produced this report, with
+    home-dir paths sanitized to ``~/...``.
+
+    Priority:
+      1. ``raw_json["repro_command"]`` — actual sanitized argv captured at
+         score time (v0.3.2+).
+      2. Fallback: walk ``sys.argv`` and sanitize home dir.
+      3. Fallback (only when sys.argv looks unrelated, e.g. when
+         re-rendering an old JSON via a helper script): synthesize a
+         clean ``refract score ...`` command from the report fields.
+    """
+    # 1. Use the JSON's repro command if present (v0.3.2+).
+    if raw_json and raw_json.get("repro_command"):
+        return raw_json["repro_command"]
+
+    # 2. Sanitize sys.argv on the fly.
+    home = os.path.expanduser("~")
+    def _sanitize(arg: str) -> str:
+        if home and arg.startswith(home + os.sep):
+            return "~" + arg[len(home):]
+        return arg
+    argv_san = [shlex.quote(_sanitize(a)) for a in sys.argv]
+    # If the invocation was a refract CLI command, return it sanitized.
+    if any("refract" in a for a in sys.argv):
+        return " ".join(argv_san)
+
+    # 3. Synthesize a clean stand-in (used when re-rendering old JSON via
+    # a helper script that has no relation to the original CLI invocation).
+    model_short = Path(model).name
+    cmd = [
+        "python3", "-m", "refract.cli", "score",
+        "--model", shlex.quote(model_short),
+        "--reference", shlex.quote(reference_label),
+        "--candidate", shlex.quote(candidate_label),
+        "--prompts", "refract/prompts/v0.1.jsonl",
+        "--corpus", "<path/to/wiki.test.raw>",
+    ]
+    if has_rniah or has_plad:
+        cmd.extend(["--full"])
+    if has_rniah:
+        cmd.extend([
+            "--rniah-haystack", "<path/to/wiki.train.raw>",
+            "--rniah-ctx-max", "16384",
+        ])
+    cmd.extend([
+        "--json-out", "report.json",
+        "--html-out", "report.html",
+    ])
+    return " ".join(cmd)
 
 
 # --------------------------------------------------------------------------
@@ -514,7 +563,12 @@ def html_report(
         env_meta = {}
     model_meta = _model_metadata(Path(model))
     hw_meta = _hardware_metadata()
-    repro = _repro_command()
+    repro = _repro_command(
+        raw_json=raw_json, model=model,
+        reference_label=reference_label, candidate_label=candidate_label,
+        has_rniah=(rniah is not None and composite.rniah_score is not None),
+        has_plad=(plad is not None and composite.plad_score is not None),
+    )
 
     band_color = _band_color(composite.band)
     diag = interpret_pattern(
@@ -591,6 +645,13 @@ def html_report(
     <summary>Raw JSON (machine-readable)</summary>
     <pre>{_esc(raw)}</pre>
   </details>
+
+  <footer style="margin-top:32px; padding-top:16px; border-top:1px solid #eee; color:#888; font-size:12px; text-align:center;">
+    REFRACT v{_esc(__version__)}.
+    What is this? See
+    <a href="https://github.com/TheTom/turboquant_plus/tree/main/refract" style="color:#3aa05a;">github.com/TheTom/turboquant_plus/refract</a>
+    for documentation, the motivation paper, and how to interpret these scores.
+  </footer>
 </div>
 </body>
 </html>

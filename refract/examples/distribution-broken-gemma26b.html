@@ -123,7 +123,7 @@ details pre {
 <div class="report">
   <header>
     <h1>REFRACT v0.3.2 — gemma-4-26B-A4B-it-Q8_0.gguf</h1>
-    <div class="subtitle">Higher is better. Score range 0–100. Generated 2026-04-30T15:32:28.</div>
+    <div class="subtitle">Higher is better. Score range 0–100. Generated 2026-04-30T15:37:38.</div>
   </header>
 
   <section>
@@ -142,7 +142,7 @@ details pre {
 
   <section>
     <h2>Per-axis breakdown</h2>
-    <div class="axis">  <div class="axis-head">    <span class="axis-label">Axis A — GTM</span>    <span class="axis-score">17.32</span>    <span class="axis-band" style="color:#cc3232;">FAIL</span>  </div>  <div class="bar" role="progressbar" aria-valuenow="17.3"><div class="fill" style="width:17.3%; background:#cc3232;"></div></div>  <div class="axis-prose">Token-level agreement with the fp16 reference (greedy decode).</div>  </div><div class="axis">  <div class="axis-head">    <span class="axis-label">Axis B — KLD@D</span>    <span class="axis-score">17.59</span>    <span class="axis-band" style="color:#cc3232;">FAIL</span>  </div>  <div class="bar" role="progressbar" aria-valuenow="17.6"><div class="fill" style="width:17.6%; background:#cc3232;"></div></div>  <div class="axis-prose">Distribution-level divergence from the fp16 reference (corpus KLD).</div>  </div><div class="axis">  <div class="axis-head">    <span class="axis-label">Axis C — R-NIAH</span>    <span class="axis-score">100.00</span>    <span class="axis-band" style="color:#2d8c2d;">EXCELLENT</span>  </div>  <div class="bar" role="progressbar" aria-valuenow="100.0"><div class="fill" style="width:100.0%; background:#2d8c2d;"></div></div>  <div class="axis-prose">Long-context retrieval quality vs the reference (NIAH at multiple lengths).</div>  <div class="subblock"><div class="subhead">R-NIAH per-cell (base / cand) — green=match, red=degraded, gray=base also fails</div><table class="rniah-grid"><thead><tr><th>length\pos</th><th>0.10</th><th>0.50</th><th>0.90</th></tr></thead><tbody><tr><th>4096</th><td class="cell" style="background:#2d8c2d;" title="candidate matches base">1.00/1.00</td><td class="cell" style="background:#2d8c2d;" title="candidate matches base">1.00/1.00</td><td class="cell" style="background:#2d8c2d;" title="candidate matches base">1.00/1.00</td></tr><tr><th>8192</th><td class="cell" style="background:#2d8c2d;" title="candidate matches base">1.00/1.00</td><td class="cell" style="background:#2d8c2d;" title="candidate matches base">1.00/1.00</td><td class="cell" style="background:#2d8c2d;" title="candidate matches base">1.00/1.00</td></tr><tr><th>16384</th><td class="cell" style="background:#eeeeee;" title="base also fails — uninformative">0.00/0.00</td><td class="cell" style="background:#eeeeee;" title="base also fails — uninformative">0.00/0.00</td><td class="cell" style="background:#eeeeee;" title="base also fails — uninformative">0.00/0.00</td></tr></tbody></table></div></div><div class="axis">  <div class="axis-head">    <span class="axis-label">Axis D — PLAD</span>    <span class="axis-score">78.40</span>    <span class="axis-band" style="color:#d49327;">DEGRADED</span>  </div>  <div class="bar" role="progressbar" aria-valuenow="78.4"><div class="fill" style="width:78.4%; background:#d49327;"></div></div>  <div class="axis-prose">Robustness to small prompt changes vs the reference (typo/case/punct/paraphrase).</div>  <div class="subblock"><div class="subhead">PLAD per-perturbation</div><table class="plad-grid"><thead><tr><th>perturbation</th><th>score</th><th>band</th><th></th></tr></thead><tbody><tr><td>typo</td><td>83.66</td><td><span class="axis-band" style="color:#3aa05a;">PASS</span></td><td><div class="bar" role="progressbar" aria-valuenow="83.7"><div class="fill" style="width:83.7%; background:#3aa05a;"></div></div></td></tr><tr><td>case</td><td>68.77</td><td><span class="axis-band" style="color:#d49327;">DEGRADED</span></td><td><div class="bar" role="progressbar" aria-valuenow="68.8"><div class="fill" style="width:68.8%; background:#d49327;"></div></div></td></tr><tr><td>punct</td><td>81.84</td><td><span class="axis-band" style="color:#3aa05a;">PASS</span></td><td><div class="bar" role="progressbar" aria-valuenow="81.8"><div class="fill" style="width:81.8%; background:#3aa05a;"></div></div></td></tr><tr><td>paraphrase</td><td><span class="skipped">skipped</span></td><td>—</td><td>perturbation didn't apply on these prompts</td></tr></tbody></table></div></div>
+    <div class="axis">  <div class="axis-head">    <span class="axis-label">Axis A — GTM (Greedy Trajectory Match)</span>    <span class="axis-score">17.32</span>    <span class="axis-band" style="color:#cc3232;">FAIL</span>  </div>  <div class="bar" role="progressbar" aria-valuenow="17.3"><div class="fill" style="width:17.3%; background:#cc3232;"></div></div>  <div class="axis-prose">Token-level agreement with the fp16 reference (greedy decode).</div>  </div><div class="axis">  <div class="axis-head">    <span class="axis-label">Axis B — KLD@D (KL Divergence at the Decoder)</span>    <span class="axis-score">17.59</span>    <span class="axis-band" style="color:#cc3232;">FAIL</span>  </div>  <div class="bar" role="progressbar" aria-valuenow="17.6"><div class="fill" style="width:17.6%; background:#cc3232;"></div></div>  <div class="axis-prose">Distribution-level divergence from the fp16 reference (corpus KLD).</div>  </div><div class="axis">  <div class="axis-head">    <span class="axis-label">Axis C — R-NIAH (Retrieval Needle-In-A-Haystack)</span>    <span class="axis-score">100.00</span>    <span class="axis-band" style="color:#2d8c2d;">EXCELLENT</span>  </div>  <div class="bar" role="progressbar" aria-valuenow="100.0"><div class="fill" style="width:100.0%; background:#2d8c2d;"></div></div>  <div class="axis-prose">Long-context retrieval quality vs the reference (NIAH at multiple lengths).</div>  <div class="subblock"><div class="subhead">R-NIAH per-cell (base / cand) — green=match, red=degraded, gray=base also fails</div><table class="rniah-grid"><thead><tr><th>length\pos</th><th>0.10</th><th>0.50</th><th>0.90</th></tr></thead><tbody><tr><th>4096</th><td class="cell" style="background:#2d8c2d;" title="candidate matches base">1.00/1.00</td><td class="cell" style="background:#2d8c2d;" title="candidate matches base">1.00/1.00</td><td class="cell" style="background:#2d8c2d;" title="candidate matches base">1.00/1.00</td></tr><tr><th>8192</th><td class="cell" style="background:#2d8c2d;" title="candidate matches base">1.00/1.00</td><td class="cell" style="background:#2d8c2d;" title="candidate matches base">1.00/1.00</td><td class="cell" style="background:#2d8c2d;" title="candidate matches base">1.00/1.00</td></tr><tr><th>16384</th><td class="cell" style="background:#eeeeee;" title="base also fails — uninformative">0.00/0.00</td><td class="cell" style="background:#eeeeee;" title="base also fails — uninformative">0.00/0.00</td><td class="cell" style="background:#eeeeee;" title="base also fails — uninformative">0.00/0.00</td></tr></tbody></table></div></div><div class="axis">  <div class="axis-head">    <span class="axis-label">Axis D — PLAD (Perturbation-Locality Aware Drift)</span>    <span class="axis-score">78.40</span>    <span class="axis-band" style="color:#d49327;">DEGRADED</span>  </div>  <div class="bar" role="progressbar" aria-valuenow="78.4"><div class="fill" style="width:78.4%; background:#d49327;"></div></div>  <div class="axis-prose">Robustness to small prompt changes vs the reference (typo/case/punct/paraphrase).</div>  <div class="subblock"><div class="subhead">PLAD per-perturbation</div><table class="plad-grid"><thead><tr><th>perturbation</th><th>score</th><th>band</th><th></th></tr></thead><tbody><tr><td>typo</td><td>83.66</td><td><span class="axis-band" style="color:#3aa05a;">PASS</span></td><td><div class="bar" role="progressbar" aria-valuenow="83.7"><div class="fill" style="width:83.7%; background:#3aa05a;"></div></div></td></tr><tr><td>case</td><td>68.77</td><td><span class="axis-band" style="color:#d49327;">DEGRADED</span></td><td><div class="bar" role="progressbar" aria-valuenow="68.8"><div class="fill" style="width:68.8%; background:#d49327;"></div></div></td></tr><tr><td>punct</td><td>81.84</td><td><span class="axis-band" style="color:#3aa05a;">PASS</span></td><td><div class="bar" role="progressbar" aria-valuenow="81.8"><div class="fill" style="width:81.8%; background:#3aa05a;"></div></div></td></tr><tr><td>paraphrase</td><td><span class="skipped">skipped</span></td><td>—</td><td>perturbation didn't apply on these prompts</td></tr></tbody></table></div></div>
   </section>
 
   <section>
@@ -152,7 +152,7 @@ details pre {
 
   <section>
     <h2>Reproduce</h2>
-    <pre class="repro">/tmp/render_example_html.py</pre>
+    <pre class="repro">python3 -m refract.cli score --model gemma-4-26B-A4B-it-Q8_0.gguf --reference ctk=f16,ctv=f16 --candidate ctk=q8_0,ctv=turbo4 --prompts refract/prompts/v0.1.jsonl --corpus &lt;path/to/wiki.test.raw&gt; --full --rniah-haystack &lt;path/to/wiki.train.raw&gt; --rniah-ctx-max 16384 --json-out report.json --html-out report.html</pre>
   </section>
 
   <details>
@@ -161,7 +161,8 @@ details pre {
   &quot;schema&quot;: &quot;refract.report.v0.3.1&quot;,
   &quot;framework_version&quot;: &quot;0.3.2&quot;,
   &quot;environment&quot;: {},
-  &quot;timestamp&quot;: &quot;2026-04-30T15:32:28&quot;,
+  &quot;repro_command&quot;: &quot;&quot;,
+  &quot;timestamp&quot;: &quot;2026-04-30T15:37:38&quot;,
   &quot;score_direction&quot;: &quot;higher_is_better&quot;,
   &quot;score_range&quot;: [
     0,
@@ -345,6 +346,13 @@ details pre {
   &quot;extras&quot;: {}
 }</pre>
   </details>
+
+  <footer style="margin-top:32px; padding-top:16px; border-top:1px solid #eee; color:#888; font-size:12px; text-align:center;">
+    REFRACT v0.3.2.
+    What is this? See
+    <a href="https://github.com/TheTom/turboquant_plus/tree/main/refract" style="color:#3aa05a;">github.com/TheTom/turboquant_plus/refract</a>
+    for documentation, the motivation paper, and how to interpret these scores.
+  </footer>
 </div>
 </body>
 </html>
