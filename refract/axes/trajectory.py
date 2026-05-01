@@ -128,19 +128,33 @@ def run_trajectory(
     cand_lens: list[int] = []
     ref_lens: list[int] = []
 
+    # Backends with per-LLM memory pressure (vLLM on hybrid models) can't
+    # afford to swap KV configs every prompt. Batch all ref calls first,
+    # then all cand calls, so each backend loads each KV config exactly once.
+    ref_traj: list[list[int]] = []
+    cand_traj: list[list[int]] = []
     for i, p in enumerate(prompts):
         if progress:
-            print(f"  [{i + 1}/{len(prompts)}] {p['id']:<10} ({p.get('category', '?')}) ...",
+            print(f"  ref [{i + 1}/{len(prompts)}] {p['id']:<10} ({p.get('category', '?')}) ...",
                   flush=True)
-
-        ref_toks, _ = run_completion_trajectory(
+        toks, _ = run_completion_trajectory(
             model=model, prompt=p["prompt"], kv=reference_kv,
             n_predict=n_predict, ctx=ctx, n_gpu_layers=n_gpu_layers, seed=seed,
         )
-        cand_toks, _ = run_completion_trajectory(
+        ref_traj.append(toks)
+    for i, p in enumerate(prompts):
+        if progress:
+            print(f"  cand [{i + 1}/{len(prompts)}] {p['id']:<10} ({p.get('category', '?')}) ...",
+                  flush=True)
+        toks, _ = run_completion_trajectory(
             model=model, prompt=p["prompt"], kv=candidate_kv,
             n_predict=n_predict, ctx=ctx, n_gpu_layers=n_gpu_layers, seed=seed,
         )
+        cand_traj.append(toks)
+
+    for i, p in enumerate(prompts):
+        ref_toks = ref_traj[i]
+        cand_toks = cand_traj[i]
 
         if not ref_toks and not cand_toks:
             raise RuntimeError(
