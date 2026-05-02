@@ -45,9 +45,58 @@ multi-axis composite (Trajectory + KLD + R-NIAH + PLAD), bit-exact on
 Metal, fail-loud (any single broken axis tanks the composite). Replaces
 "lower PPL = better" because PPL inverts sign on instruct-tuned models.
 
+## Step 0 — clone and install REFRACT
+
+If you don't already have the repo on disk:
+
+```bash
+# REFRACT lives inside the turboquant_plus repo
+git clone https://github.com/TheTom/turboquant_plus.git
+cd turboquant_plus
+
+# Editable install (REFRACT alpha — zero non-stdlib deps in the base)
+pip install -e .
+
+# Optional backend extras (pick what you need):
+pip install -e .[refract-mlx]      # Apple Silicon
+pip install -e .[refract-vllm]     # CUDA / ROCm in-process LLM
+pip install -e .[refract-sglang]   # HTTP client to a separately-launched SGLang server
+```
+
+Every later command (`python3 -m refract.cli ...`) assumes you are
+running from the `turboquant_plus/` checkout.
+
+If you also want the patched llama.cpp binaries (the llamacpp backend
+needs them on `PATH` / `LD_LIBRARY_PATH`):
+
+```bash
+# In a sibling directory
+git clone https://github.com/TheTom/llama-cpp-turboquant.git
+cd llama-cpp-turboquant
+cmake -B build-allquants -DGGML_METAL=ON   # or -DGGML_HIP=ON, -DGGML_CUDA=ON
+cmake --build build-allquants -j --target llama-cli llama-completion llama-tokenize llama-perplexity
+# Set LLAMA_CPP_BIN_DIR to the build-allquants/bin path before running refract
+export LLAMA_CPP_BIN_DIR=$PWD/build-allquants/bin
+```
+
+For the vLLM backend on CUDA / ROCm, either install upstream `vllm`
+(`pip install vllm`) or pull the author's fork:
+
+```bash
+git clone https://github.com/TheTom/vllm.git
+cd vllm
+pip install -e .   # this can take a while on ROCm; refer to vLLM's own ROCm docs
+```
+
+For SGLang, the simplest path is the published Docker image (the bench
+in `docs/papers/cross-engine-mi300x.md` uses
+`lmsysorg/sglang:v0.5.10.post1-rocm720-mi30x` for AMD MI300X — see §6
+for the in-container patches that image needs).
+
 ## Prereqs
 
-You need at minimum:
+Once REFRACT is installed and you're inside the `turboquant_plus/`
+checkout, you need:
 
   - Python 3.10+
   - One of:
@@ -80,7 +129,7 @@ You need at minimum:
     explicit paths (CI-friendly).
   - The prompts JSONL ships at `refract/prompts/v0.1.jsonl`.
 
-## Step 0 — preflight (~30 seconds)
+## Step 2 — preflight (~30 seconds)
 
 ```bash
 # llama.cpp model (.gguf)
@@ -101,7 +150,7 @@ Verifies binaries, flags, env vars, and a tiny generation. If it bails,
 fix the reported issue before going further. Don't burn a long run
 finding out your setup is broken.
 
-## Step 1 — first quick score (5–7 min on a 7B Q8)
+## Step 3 — first quick score (5–7 min on a 7B Q8)
 
 ```
 python3 -m refract.cli score \
@@ -117,7 +166,7 @@ first run). This runs Trajectory + KLD@D — the two cheap axes. You'll
 get a composite score, a band (EXCELLENT/PASS/DEGRADED/FAIL), and a
 plain-English diagnosis of what the per-axis pattern means.
 
-## Step 2 — full audit (25–30 min on a 7B Q8)
+## Step 4 — full audit (25–30 min on a 7B Q8)
 
 Add `--full`. Both haystack file and corpus are auto-resolved from the cache.
 
@@ -189,7 +238,7 @@ Sample reports live in [`examples/`](examples/) (4 real reports from
 the 2026-04-30 matrix run). Open one to preview the format before
 running your own.
 
-## Step 3 — interpret the result
+## Step 5 — interpret the result
 
 Quick table:
 
@@ -208,7 +257,7 @@ prompts") and a suggested next move.
 
 For deeper interpretation see [`INTERPRETATION.md`](INTERPRETATION.md).
 
-## Step 4 — compare candidates side by side
+## Step 6 — compare candidates side by side
 
 ```
 python3 -m refract.cli compare \
