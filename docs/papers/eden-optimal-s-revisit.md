@@ -71,7 +71,7 @@ When the EDEN authors say "TurboQuant," they mean the artifact in the Google pap
 
 Eight hypothesis tests this round, plus four rounds of "stress-test the conclusion":
 
-- **Synthetic side:** N=10000 random Gaussian vectors, `d=128`, `b=4` for the headline. Sweeps at `d ∈ {64, 128, 256}` (HL7), `(d, b)` up to `(1024, 8)` (HL5), and 5 random WHT seeds (HL8). Compare matched-norm scale (TurboQuant+ ships), EDEN's per-vector biased optimal `S`, no-scale, across rotations (dense Haar vs Walsh-Hadamard) and centroid tables (Lloyd-from-scratch vs EDEN's half-normal).
+- **Synthetic side:** N=10000 random Gaussian vectors, `d=128`, `b=4` for the headline. Sweeps at `d ∈ {64, 128, 256}` (HL7), `(d, b)` up to `(1024, 8)` (HL5), and 5 random WHT seeds (HL8). Compare matched-norm scale (TurboQuant+ ships), EDEN's per-vector `S` formula (the eden.py default — see Terminology note in §4), no-scale, across rotations (dense Haar vs Walsh-Hadamard) and centroid tables (Lloyd-from-scratch vs EDEN's half-normal).
 - **Real KV side:** Dump KV cache from Qwen3-0.6B and Llama-3.2-1B-Instruct forward passes over wikitext-2-raw (512 tokens). Sample 256-512 vectors per layer per cache (K, V) for 3-7 layers per model. Run scale variants at `b=2, 3, 4` on Qwen, `b=4` on Llama (cross-family confirmation, MH1).
 - **Reference:** the literal EDEN implementation from amitport's repo at commit `5c7639a6`, unmodified.
 
@@ -98,6 +98,8 @@ Before the numbers, the lockdown. Reviewer concern: am I comparing the same algo
 The two normalization conventions are equivalent up to a constant: EDEN scales x by `sqrt(d)/||x||` and uses centroids at sigma=1, my path scales x by `1/||x||` and uses centroids at sigma=1/sqrt(d). Both produce the same reduced bucketize input distribution. The arithmetic check: a coordinate `x_i` in EDEN's frame has `Var(x_i) = (sqrt(d)/||x||)² · ||x||²/d = 1`; in my frame, `Var(x_i) = (1/||x||)² · ||x||²/d = 1/d`. Centroids are scaled correspondingly, so the bucketize result is identical.
 
 One asymmetry I want to flag: EDEN's reference impl uses *fresh* random sign flips per encode (the Rademacher diagonal is regenerated from a per-call seed), while my WHT path uses *fixed* signs from `np.random.default_rng(seed=42)`. HL8 below confirms that the std deviation of MSE across 5 different fixed seeds for my WHT is ~0.13% of the mean, which is well below any of the gaps I report. Fresh-per-encode vs fixed-seed is not a meaningful confound at this measurement floor.
+
+**Terminology note on the "EDEN-S" comparison.** Throughout this paper I refer to "EDEN-biased optimal S" or "biased optS" when describing the eden.py default formula `S = ||x_rot||² / ⟨c, x_rot⟩`. On closer inspection that label is imprecise. The strict per-vector MSE-minimum (minimize `||x - Sc||²`) is `S* = ⟨c, x⟩ / ||c||²` (textbook least-squares; asymptotically → 1 for Lloyd-Max optimal centroids by orthogonality). The eden.py default is a different formula, which satisfies the inner-product-preserving identity `⟨Sc, x⟩ = ||x||²` per vector. Concrete check with x=[3,4], c=[1,1]: the eden.py formula gives S=25/7≈3.571 with reconstruction MSE 0.511; the strict MSE-biased optimum is S=3.5 with MSE 0.500. They are different formulas with different objectives. All of my "EDEN-S" empirical results in this paper correspond to the eden.py default (the inner-product-preserving variant), not the strict MSE-biased per-vector formula. Where I use "biased" as a label below, read it as "eden.py default per-vector S formula" — the empirical comparisons are unaffected, the labeling was loose. Thanks to @amitport for surfacing this in [#89](https://github.com/TheTom/turboquant_plus/issues/89).
 
 ---
 
@@ -225,7 +227,7 @@ Representative numbers (V cache):
 
 Two things fall out:
 
-1. **PolarQuant matched-norm and EDEN-biased and EDEN-ref are all within 1-3% MSE of each other on every layer × {K, V} I sampled.** No meaningful gap from switching to EDEN-S on real KV.
+1. **PolarQuant matched-norm and EDEN-S (eden.py default formula) and EDEN-ref are all within 1-3% MSE of each other on every layer × {K, V} I sampled.** No meaningful gap from switching to EDEN-S on real KV.
 2. **TurboQuant_prod is 5-6x worse MSE than direct b-bit PolarQuant at the same total bit count.** The "k-bit EDEN beats (k+1)-bit TurboQuant_prod" claim does technically hold here: 3-bit EDEN at 3.19e-02 beats 4-bit TurboQuant_prod at 5.06e-02 on layer 12 V. But the `_prod` chain (PolarQuant + QJL residual) is the wrong baseline. Production V cache uses TurboQuant_mse (PolarQuant only), not TurboQuant_prod, exactly because we already established (in [turbo4-resurrection](https://github.com/TheTom/turboquant_plus/blob/main/docs/papers/turbo4-resurrection.md)) that QJL hurts attention quality. Five independent groups confirmed this.
 
 So the "1 bit free" result evaluates `_prod` against EDEN, but production already left `_prod` behind months ago for unrelated reasons.
@@ -236,7 +238,7 @@ So the "1 bit free" result evaluates `_prod` against EDEN, but production alread
 
 The cleanest test of the note's algorithmic claim: hold the rotation and centroids fixed, vary only the scale formula, on real KV.
 
-| layer | K/V | b | matched | biased optS | unbiased avg |
+| layer | K/V | b | matched | EDEN-S | empirical avg |
 |---|---|---|---:|---:|---:|
 | 0 | V | 4 | 7.20e-04 | 7.38e-04 | 7.46e-04 |
 | 12 | V | 4 | 1.31e-02 | 1.32e-02 | 1.35e-02 |
@@ -244,7 +246,7 @@ The cleanest test of the note's algorithmic claim: hold the rotation and centroi
 | 23 | V | 4 | 2.57e-01 | 2.59e-01 | 2.64e-01 |
 | 23 | V | 2 | **3.35e+00** | **3.68e+00** | 3.69e+00 |
 
-Across 4 layers × {K, V} × `b={2,3,4}`: matched-norm consistently beats EDEN's biased optimal `S` by 0.5 to 9% in MSE on real KV. The gap grows at lower bit counts. Worst case for EDEN-S is layer 23 V at `b=2`, where matched-norm at 3.35 beats biased optS at 3.68 (EDEN's "optimal" formula is 8.9% worse than the simple matched-norm rule).
+Across 4 layers × {K, V} × `b={2,3,4}`: matched-norm consistently beats the eden.py default `S` formula by 0.5 to 9% in MSE on real KV. The gap grows at lower bit counts. Worst case for EDEN-S is layer 23 V at `b=2`, where matched-norm at 3.35 beats EDEN-S at 3.68 (the eden.py formula is 8.9% worse than the simple matched-norm rule on this cell).
 
 Why does the analytical-optimal scale lose to a heuristic? Because EDEN's `S` is optimal under specific distributional assumptions: iid Gaussian post-rotation marginals, the specific half-normal centroid table, and the bias structure that comes with their estimator (the one designed for unbiased mean estimation across many clients). Real KV cache vectors after WHT rotation have heavy tails, layer-dependent variance (300x MSE swing across layers), and non-Gaussian structure. Once those assumptions break, "analytically optimal" becomes "optimal for the wrong distribution."
 
@@ -328,7 +330,7 @@ The honest framing: at b=8 on iid Gaussian, EDEN-S is the right tool. At b=4 on 
 Stitching it together, with the first-order vs second-order frame:
 
 1. **The rotation choice is the first-order lever.** Hadamard beats dense Haar by ~71% in MSE on synthetic Gaussian at d=128, +334% at d=256. Production TurboQuant+ already uses WHT (a randomized Hadamard variant), so the headline 19% MSE gap on synthetic Gaussian doesn't transfer. This is the fix the EDEN authors built into their reference impl years before TurboQuant; it's also the fix that ships in TurboQuant+ today. We agree on which rotation to use.
-2. **The optimal-S formula is a real second-order lever.** It contributes ~1% on synthetic (HL7 confirms this is dimension-invariant) and *negative* contribution on real KV (H6, H7). On real KV cache (post-WHT), matched-norm beats EDEN's biased optimal `S` by 0.5 to 9% across the configs I tested across two model families. The optimality argument depends on iid Gaussian assumptions that real KV violates.
+2. **The optimal-S formula is a real second-order lever.** It contributes ~1% on synthetic (HL7 confirms this is dimension-invariant) and *negative* contribution on real KV (H6, H7). On real KV cache (post-WHT), matched-norm beats the eden.py default `S` formula by 0.5 to 9% across the configs I tested across two model families. The eden.py formula is optimal under iid Gaussian post-rotation assumptions that real KV violates.
 3. **The optimal-S lever does have a regime where it wins big.** HL5 shows EDEN-S beats matched-norm by 34-76% at b=6 and b=8 on synthetic Gaussian. That regime is iid Gaussian + high bit budget + closely matched centroid table. KV cache compression at b=4 with heavy-tailed real distributions is a different regime, and the lever shrinks to ±1% there.
 4. **The "1 bit free" claim only applies vs TurboQuant_prod.** Production V cache uses TurboQuant_mse, not _prod, because we already know QJL hurts attention. Comparing against _prod and ignoring that result is comparing against a baseline production already abandoned for independent reasons.
 5. **The note paper is correct under its own assumptions.** I am not claiming the math is wrong. I am claiming the assumptions don't hold at the deployment surface I ship to. The interesting algorithmic territory is on the prototype side and at high b on synthetic data (where assumptions are closer to satisfied), not on real KV at b=4 (where they're not).
