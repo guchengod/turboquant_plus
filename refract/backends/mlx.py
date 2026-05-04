@@ -296,19 +296,46 @@ class MLXBackend(Backend):
             logits = m(inp, cache=prompt_cache)
             return logits[0]  # squeeze batch
 
+        # KL accumulator across positions. We weight per-position contributions
+        # by valid-position count so chunks with NaN/Inf positions (which can
+        # happen on heavily-quantized weight models where some logits underflow)
+        # don't poison the whole chunk's mean.
         total_kl = 0.0
+        total_valid_positions = 0
         for i in range(n_chunks):
             chunk = all_tokens[i * ctx : (i + 1) * ctx]
             ref_logits = _logits_for_chunk(chunk, ref_kwargs["kv_bits"])
             cand_logits = _logits_for_chunk(chunk, cand_kwargs["kv_bits"])
 
-            ref_p = mx.softmax(ref_logits, axis=-1)
-            ref_logp = mx.log(ref_p + 1e-12)
-            cand_logp = mx.log(mx.softmax(cand_logits, axis=-1) + 1e-12)
+            # Numerically stable: log_softmax avoids log(0) underflow.
+            # KL(P||Q) = sum_i P_i (log P_i - log Q_i)
+            #         = sum_i exp(logP_i) (logP_i - logQ_i)
+            ref_logp = ref_logits - mx.logsumexp(ref_logits, axis=-1, keepdims=True)
+            cand_logp = cand_logits - mx.logsumexp(cand_logits, axis=-1, keepdims=True)
+            ref_p = mx.exp(ref_logp)
             kl_per_pos = mx.sum(ref_p * (ref_logp - cand_logp), axis=-1)
-            total_kl += float(mx.mean(kl_per_pos).item())
 
-        mean_kld = total_kl / n_chunks
+            # Filter non-finite positions and accumulate weighted by valid count
+            # so the chunk-level mean is robust to a small number of bad logits
+            # in deeply-quantized models.
+            kl_arr = kl_per_pos
+            finite_mask = mx.isfinite(kl_arr)
+            n_valid = int(mx.sum(finite_mask).item())
+            if n_valid == 0:
+                continue
+            # Replace NaN/Inf with 0 so the sum below is well-defined.
+            kl_clean = mx.where(finite_mask, kl_arr, mx.zeros_like(kl_arr))
+            chunk_kl_sum = float(mx.sum(kl_clean).item())
+            total_kl += chunk_kl_sum
+            total_valid_positions += n_valid
+
+        if total_valid_positions == 0:
+            raise BackendCapabilityError(
+                "MLX KLD: every position produced non-finite KL. The model's "
+                "logits may be underflowing on this KV config. Try a less "
+                "aggressive candidate (e.g. q6_K/q6_K) or run --skip-kld."
+            )
+        mean_kld = total_kl / total_valid_positions
         return KLDResult(
             mean_kld=mean_kld,
             ppl=None,

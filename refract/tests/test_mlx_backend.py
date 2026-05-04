@@ -85,14 +85,23 @@ def fake_mlx(monkeypatch):
         def __getitem__(self, idx):
             return self
         def item(self):
-            # Used to coerce mx scalars to python floats.
-            return 0.0
+            # Used to coerce mx scalars to python floats. Return a small
+            # non-zero value so the v0.3.2.3 KLD validity-counting path
+            # (n_valid = mx.sum(finite_mask).item()) treats the chunk as
+            # contributing rather than skipping every chunk as non-finite.
+            return 1.0
 
     mx.array = lambda data: _MxArray(data)
     mx.softmax = lambda a, axis=-1: a
     mx.log = lambda a: a
-    mx.sum = lambda a, axis=-1: a
-    mx.mean = lambda a: a
+    mx.sum = lambda *a, **kw: _MxArray("sum")
+    mx.mean = lambda a: _MxArray("mean")
+    # Numerically-stable KL stubs added in v0.3.2.3.
+    mx.logsumexp = lambda a, axis=-1, keepdims=False: a
+    mx.exp = lambda a: a
+    mx.isfinite = lambda a: a
+    mx.where = lambda mask, a, b: a
+    mx.zeros_like = lambda a: a
 
     # mlx_lm.generate / stream_generate / load
     mlx_lm = types.SimpleNamespace()

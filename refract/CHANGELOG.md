@@ -5,6 +5,31 @@ matrix result that motivated or validated the change.
 
 ---
 
+## v0.3.2.3 — MLX KLD numerical stability + non-finite filtering (2026-05-03)
+
+### What changed
+
+MLX backend's `run_kld` was producing `mean_kld = NaN` on
+already-quantized weight models (e.g.
+`mlx-community/Qwen2.5-1.5B-Instruct-8bit`). The previous formulation
+computed `log(softmax(logits) + 1e-12)` which can underflow on sharply
+peaked distributions, producing NaN that propagates to the mean.
+
+Now:
+
+- KL is computed from log-softmax (`logits - logsumexp(logits)`) which
+  is numerically stable.
+- Per-position KL values that are non-finite (NaN or Inf) are filtered
+  before aggregation. Mean KLD is computed across only valid positions.
+- If every position in every chunk is non-finite, the backend raises
+  `BackendCapabilityError` with an actionable hint (try less aggressive
+  candidate, or `--skip-kld`) rather than silently returning NaN.
+
+Reported during the Mac mini install walkthrough on v0.3.2.2 (2026-05-03)
+where Qwen2.5-1.5B-Instruct-8bit + q8_0/q8_0 KV produced KLD score NaN.
+
+---
+
 ## v0.3.2.2 — `--prompts` defaults to bundled (2026-05-03)
 
 ### What changed

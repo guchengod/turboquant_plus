@@ -45,22 +45,45 @@ multi-axis composite (Trajectory + KLD + R-NIAH + PLAD), bit-exact on
 Metal, fail-loud (any single broken axis tanks the composite). Replaces
 "lower PPL = better" because PPL inverts sign on instruct-tuned models.
 
-## Step 0 — clone and install REFRACT
+## Step 0 — install REFRACT
 
-If you don't already have the repo on disk:
+### Recommended: PyPI
 
 ```bash
-# REFRACT lives inside the turboquant_plus repo
+# Apple Silicon
+pip install 'refract-llm[refract-mlx]'
+
+# CUDA / ROCm (vLLM in-process)
+pip install 'refract-llm[refract-vllm]'
+
+# SGLang HTTP client (you run the SGLang server separately, e.g. via Docker)
+pip install 'refract-llm[refract-sglang]'
+
+# All three backends in one shot
+pip install 'refract-llm[full]'
+```
+
+After install: the `refract` CLI is on your PATH, the v0.1 prompts file
++ example reports + the llama.cpp trajectory patch all ship inside the
+wheel.
+
+> **macOS gotcha — system Python 3.9 won't work.** macOS ships
+> `/usr/bin/python3` as 3.9; mlx-lm requires Python 3.10+. Use a newer
+> Python (e.g. `brew install python@3.13` then `python3.13 -m venv ...`)
+> for the MLX backend. The base framework runs on 3.9, but the backend
+> extra refuses to resolve there.
+
+### Source install (for hacking / contributing)
+
+```bash
 git clone https://github.com/TheTom/turboquant_plus.git
 cd turboquant_plus
 
-# Editable install (REFRACT alpha — zero non-stdlib deps in the base)
-pip install -e .
-
-# Optional backend extras (pick what you need):
-pip install -e .[refract-mlx]      # Apple Silicon
-pip install -e .[refract-vllm]     # CUDA / ROCm in-process LLM
-pip install -e .[refract-sglang]   # HTTP client to a separately-launched SGLang server
+pip install -e .                   # editable install, base
+pip install -e .[refract-mlx]      # editable + MLX backend
+pip install -e .[refract-vllm]     # editable + vLLM backend
+pip install -e .[refract-sglang]   # editable + SGLang backend
+pip install -e .[dev]              # editable + pytest + coverage + build tooling
 ```
 
 Every later command (`python3 -m refract.cli ...`) assumes you are
